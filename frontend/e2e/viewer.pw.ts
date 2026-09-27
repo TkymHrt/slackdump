@@ -122,22 +122,22 @@ test("loads older history, opens a profile, and opens a search hit", async ({ pa
   await page.goto("/archives/C1");
   await expect(page.getByRole("heading", { name: "#general" })).toBeVisible();
   await expect(page.getByText("message 205")).toBeVisible();
-  const scroller = page.getByLabel("Channel messages");
+  const scroller = page.getByLabel("チャンネルのメッセージ");
   await scroller.evaluate((element) => {
     element.scrollTop = 0;
     element.dispatchEvent(new Event("scroll"));
   });
   await expect.poll(() => cursors.length).toBeGreaterThan(0);
   await expect.poll(() => scroller.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-  await page.getByRole("button", { name: "View Ada's profile" }).first().click();
+  await page.getByRole("button", { name: "Adaのプロフィールを開く" }).first().click();
   await expect(page.getByRole("heading", { name: "Ada" })).toBeVisible();
-  await page.getByRole("button", { name: "Back" }).click();
+  await page.getByRole("button", { name: "戻る" }).click();
   await expect(page.getByRole("heading", { name: "#general" })).toBeVisible();
 
-  await page.getByRole("searchbox", { name: "Search messages" }).fill("reply body");
+  await page.getByRole("searchbox", { name: "メッセージを検索" }).fill("reply body");
   await page.getByRole("button", { name: /reply body/ }).click();
   await expect(page).toHaveURL(new RegExp(`/archives/C1/${ts(100)}#${reply.ts}$`));
-  await expect(page.getByLabel("Thread").getByText("reply body")).toBeVisible();
+  await expect(page.getByLabel("スレッド").getByText("reply body")).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("viewer.png") });
 });
 
@@ -153,9 +153,9 @@ test("opens an older message link and shows its target", async ({ page }) => {
 test("filters conversations from the mobile sidebar", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
-  await page.getByRole("button", { name: "Open conversations" }).click();
+  await page.getByRole("button", { name: "会話一覧を開く" }).click();
   const sidebar = page.getByRole("dialog");
-  await sidebar.getByRole("textbox", { name: "Filter conversations" }).fill("general");
+  await sidebar.getByRole("textbox", { name: "会話を絞り込む" }).fill("general");
   await sidebar.getByRole("link", { name: "general" }).click();
   await expect(sidebar).toBeHidden();
   await expect(page.getByRole("heading", { name: "#general" })).toBeVisible();
@@ -196,11 +196,14 @@ test("switches canvas tabs with the keyboard and keeps its sandbox", async ({ pa
     route.fulfill({ contentType: "text/html", body: "<p>Canvas body</p>" }),
   );
   await page.goto("/archives/C1");
-  const messagesTab = page.getByRole("tab", { name: "Messages" });
+  const messagesTab = page.getByRole("tab", { name: "メッセージ" });
   await messagesTab.focus();
   await messagesTab.press("ArrowRight");
   await expect(page).toHaveURL(/\/archives\/C1\/canvas$/);
-  await expect(page.getByRole("tab", { name: "Canvas" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tab", { name: "キャンバス" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
   await expect(page.locator("iframe")).toHaveAttribute("sandbox", "allow-same-origin");
 });
 
@@ -213,8 +216,8 @@ test("the thread root scrolls together with replies", async ({ page }) => {
     route.fulfill({ json: { root: longRoot, messages: [reply], hasMore: false } }),
   );
   await page.goto(`/archives/C1/${ts(100)}`);
-  const scroller = page.getByLabel("Thread messages");
-  const original = scroller.getByText("Original message");
+  const scroller = page.getByLabel("スレッドのメッセージ");
+  const original = scroller.getByText("元の投稿");
   await scroller.evaluate((element) => {
     element.scrollTop = 0;
     element.dispatchEvent(new Event("scroll"));
@@ -232,7 +235,7 @@ test("clicking an inline image does not download; download is explicit", async (
   const path = "/slackdump/file/F1/sample.png";
   const imageMessage = {
     ...messages[0],
-    html: `<section class="slack-files"><div class="file-preview-container"><img class="file-image" src="${path}" alt="sample.png" width="200" height="120"><div><a class="file-download file-link" href="${path}" download="sample.png" aria-label="Download sample.png">Download image</a></div></div></section>`,
+    html: `<section class="slack-files"><div class="file-preview-container"><img class="file-image" src="${path}" alt="sample.png" width="200" height="120"><div><a class="file-download file-link" href="${path}" download="sample.png" aria-label="sample.pngをダウンロード">画像をダウンロード</a></div></div></section>`,
   };
   await page.route("**/api/channels/C1/messages*", (route) =>
     route.fulfill({ json: { messages: [imageMessage], hasMore: false } }),
@@ -256,7 +259,7 @@ test("clicking an inline image does not download; download is explicit", async (
   expect(downloads).toHaveLength(0);
   await expect(page).toHaveURL(/\/archives\/C1$/);
   const download = page.waitForEvent("download");
-  await page.getByRole("link", { name: "Download sample.png" }).click();
+  await page.getByRole("link", { name: "sample.pngをダウンロード" }).click();
   expect((await download).suggestedFilename()).toBe("sample.png");
 });
 
@@ -267,7 +270,7 @@ test("an older message link can scroll forward without a latest button", async (
   const newer = page.waitForResponse(
     (response) => response.url().includes("/messages?after=") && response.status() === 200,
   );
-  const scroller = page.getByLabel("Channel messages");
+  const scroller = page.getByLabel("チャンネルのメッセージ");
   await scroller.hover();
   await page.mouse.wheel(0, 600);
   await newer;
@@ -291,7 +294,7 @@ test("an older message link can scroll forward without a latest button", async (
 
 test("a message link before archive history can still scroll forward", async ({ page }) => {
   await page.goto("/archives/C1#1000000000.000001");
-  const scroller = page.getByLabel("Channel messages");
+  const scroller = page.getByLabel("チャンネルのメッセージ");
   await scroller.hover();
   const newer = page.waitForResponse(
     (response) =>
@@ -339,7 +342,7 @@ test("a thread deep link can scroll into newer replies", async ({ page }) => {
   });
   await page.goto(`/archives/C1/${threadTS}#${stamp(45)}`);
   await expect(page.getByText("reply 45", { exact: true })).toBeVisible();
-  const scroller = page.getByLabel("Thread messages");
+  const scroller = page.getByLabel("スレッドのメッセージ");
   const newer = page.waitForResponse(
     (response) =>
       new URL(response.url()).searchParams.get("after") === stamp(45) && response.status() === 200,
@@ -354,7 +357,7 @@ test("multiple images in one message form a horizontal gallery", async ({ page }
   await page.setViewportSize({ width: 600, height: 700 });
   const previews = Array.from({ length: 3 }, (_, index) => {
     const path = `/slackdump/file/F${index + 1}/picture.png`;
-    return `<div class="file-preview-container"><img class="file-image" src="${path}" alt="picture ${index + 1}" width="240" height="140"><div><a class="file-download file-link" href="${path}" download="picture.png">Download image</a></div></div>`;
+    return `<div class="file-preview-container"><img class="file-image" src="${path}" alt="picture ${index + 1}" width="240" height="140"><div><a class="file-download file-link" href="${path}" download="picture.png">画像をダウンロード</a></div></div>`;
   }).join("");
   await page.route("**/api/channels/C1/messages*", (route) =>
     route.fulfill({
@@ -380,4 +383,30 @@ test("multiple images in one message form a horizontal gallery", async ({ page }
   const gallery = page.locator(".file-items");
   await expect(gallery).toBeVisible();
   expect(await gallery.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+});
+
+test("a post link can be opened and copied from its message", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.goto("/archives/C1");
+  const row = page.locator(`article[id="${ts(205)}"]`);
+  await row.waitFor();
+  const link = row.getByRole("link", { name: "投稿へのリンクを開く" });
+  await expect(link).toHaveAttribute("href", `/archives/C1#${ts(205)}`);
+  await link.click();
+  await expect(page).toHaveURL(new RegExp(`#${ts(205)}$`));
+  await row.getByRole("button", { name: "投稿リンクをコピー" }).click();
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toBe(`http://127.0.0.1:5173/archives/C1#${ts(205)}`);
+  await expect(
+    row.getByRole("button", { name: "投稿リンクをコピー" }).getByText("コピーしました"),
+  ).toBeVisible();
+});
+
+test("main viewer controls use Japanese labels", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator("html")).toHaveAttribute("lang", "ja");
+  await expect(page.getByRole("heading", { name: "会話を選択してください" })).toBeVisible();
+  await expect(page.getByRole("searchbox", { name: "メッセージを検索" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "チャンネル" })).toBeVisible();
 });

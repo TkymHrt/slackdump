@@ -85,9 +85,11 @@ function ChannelLink({
       className={`flex min-w-0 items-center gap-2.5 rounded-md px-3 py-1.5 text-[0.87rem] transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground ${selected ? "bg-sidebar-accent font-semibold text-sidebar-accent-foreground" : "text-sidebar-foreground/75"}`}
     >
       <Icon className="size-4 shrink-0 opacity-65" aria-hidden="true" />
-      <span className="truncate">{channel.alias || channel.name.replace(/^(#|@|🔒\s*)/, "")}</span>
+      <span className="truncate">
+        {channel.alias || channel.name.replace(/^(#|@|🔒\s*)/, "").replace(/ \(archived\)$/, "")}
+      </span>
       {channel.archived && (
-        <Archive className="ml-auto size-3.5 shrink-0 opacity-45" aria-label="Archived" />
+        <Archive className="ml-auto size-3.5 shrink-0 opacity-45" aria-label="アーカイブ済み" />
       )}
     </a>
   );
@@ -105,8 +107,8 @@ function Sidebar({
   const [filter, setFilter] = useState("");
   const needle = filter.trim().toLocaleLowerCase();
   const groups: { title: string; kinds: Channel["kind"][] }[] = [
-    { title: "Channels", kinds: ["public", "private"] },
-    { title: "Direct messages", kinds: ["group", "dm"] },
+    { title: "チャンネル", kinds: ["public", "private"] },
+    { title: "ダイレクトメッセージ", kinds: ["group", "dm"] },
   ];
   return (
     <div className="flex h-full min-h-0 flex-col bg-sidebar text-sidebar-foreground">
@@ -126,8 +128,8 @@ function Sidebar({
             aria-hidden="true"
           />
           <Input
-            aria-label="Filter conversations"
-            placeholder="Filter conversations"
+            aria-label="会話を絞り込む"
+            placeholder="チャンネル・DMを絞り込む"
             value={filter}
             onChange={(event) => setFilter(event.target.value)}
             className="h-9 pl-8 text-sm"
@@ -167,11 +169,11 @@ function Sidebar({
           {needle &&
             !data.channels.some((channel) =>
               `${channel.alias || ""} ${channel.name}`.toLocaleLowerCase().includes(needle),
-            ) && <p className="px-3 text-sm text-muted-foreground">No conversations found.</p>}
+            ) && <p className="px-3 text-sm text-muted-foreground">該当する会話はありません。</p>}
         </div>
       </ScrollArea>
       <div className="border-t border-sidebar-border px-5 py-3 text-xs text-muted-foreground">
-        {data.channels.length} conversations · {data.type}
+        会話 {data.channels.length}件
       </div>
     </div>
   );
@@ -226,8 +228,8 @@ function GlobalSearch({
         <Input
           ref={inputRef}
           type="search"
-          placeholder="Search all messages  /"
-          aria-label="Search messages"
+          placeholder="メッセージを検索（/）"
+          aria-label="メッセージを検索"
           value={input}
           onChange={(event) => setInput(event.target.value)}
           className="h-9 border-transparent bg-muted/60 pl-9 pr-3 focus-visible:border-ring"
@@ -237,11 +239,11 @@ function GlobalSearch({
         <div
           className="absolute left-0 right-0 top-11 z-30 max-h-[min(70vh,34rem)] overflow-auto rounded-xl border bg-popover p-2 shadow-xl"
           role="region"
-          aria-label="Search results"
+          aria-label="検索結果"
         >
           <div className="flex items-center justify-between px-2 py-1.5 text-xs text-muted-foreground">
             <span>
-              {results.isFetching ? "Searching…" : `${results.data?.results.length || 0} results`}
+              {results.isFetching ? "検索中…" : `${results.data?.results.length || 0}件の結果`}
             </span>
             {channelId && (
               <label className="flex items-center gap-1.5">
@@ -250,13 +252,13 @@ function GlobalSearch({
                   checked={scope}
                   onChange={(event) => setScope(event.target.checked)}
                 />
-                This channel
+                この会話のみ
               </label>
             )}
           </div>
           {results.isError && (
             <p role="alert" className="p-3 text-sm text-destructive">
-              Search failed: {results.error.message}
+              検索できませんでした：{results.error.message}
             </p>
           )}
           {results.data?.results.map((result) => {
@@ -285,7 +287,9 @@ function GlobalSearch({
             );
           })}
           {results.data && results.data.results.length === 0 && (
-            <p className="p-4 text-center text-sm text-muted-foreground">No matching messages.</p>
+            <p className="p-4 text-center text-sm text-muted-foreground">
+              一致するメッセージはありません。
+            </p>
           )}
         </div>
       )}
@@ -322,13 +326,16 @@ function ChannelHeader({
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <h2 className="truncate text-base font-bold sm:text-lg">
-              {channel.alias || channel.name}
+              {channel.alias || channel.name.replace(/ \(archived\)$/, "")}
             </h2>
+            {channel.archived && (
+              <span className="text-xs text-muted-foreground">アーカイブ済み</span>
+            )}
             {canAlias && (
               <Button
                 variant="ghost"
                 size="icon-xs"
-                aria-label="Edit channel alias"
+                aria-label="別名を編集"
                 onClick={() => setEditing(!editing)}
               >
                 <Pencil className="size-3.5" />
@@ -349,18 +356,18 @@ function ChannelHeader({
           className="flex items-center gap-2 border-t bg-muted/30 px-5 py-2 sm:px-8"
         >
           <Input
-            aria-label="Channel alias"
+            aria-label="別名"
             value={alias}
             onChange={(event) => setAlias(event.target.value)}
             maxLength={30}
-            placeholder="Channel alias"
+            placeholder="別名を入力"
             className="max-w-64"
           />
           <Button type="submit" size="sm" disabled={mutation.isPending}>
-            Save
+            保存
           </Button>
           <Button type="button" size="sm" variant="ghost" onClick={() => setEditing(false)}>
-            Cancel
+            キャンセル
           </Button>
           {mutation.isError && (
             <span role="alert" className="text-xs text-destructive">
@@ -372,7 +379,7 @@ function ChannelHeader({
       {channel.canvasPresent && (
         <div
           role="tablist"
-          aria-label="Channel views"
+          aria-label="会話の表示を切り替える"
           className="flex gap-4 px-5 sm:px-8"
           onKeyDown={(event) => {
             if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
@@ -406,7 +413,7 @@ function ChannelHeader({
             onClick={() => navigate(base)}
             className={`border-b-2 pb-2 text-sm font-medium ${!canvasActive ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
           >
-            Messages
+            メッセージ
           </button>
           <button
             id="tab-canvas"
@@ -419,7 +426,7 @@ function ChannelHeader({
             onClick={() => navigate(`${base}/canvas`)}
             className={`border-b-2 pb-2 text-sm font-medium disabled:opacity-40 ${canvasActive ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
           >
-            Canvas
+            キャンバス
           </button>
         </div>
       )}
@@ -440,7 +447,7 @@ function Profile({ userId, navigate }: { userId: string; navigate: (path: string
         onClick={() => (window.history.length > 1 ? window.history.back() : navigate("/"))}
       >
         <ArrowLeft className="size-4" />
-        Back
+        戻る
       </Button>
       {user.isPending ? (
         <Skeleton className="mt-8 h-40 w-full max-w-md" />
@@ -518,7 +525,7 @@ function App() {
         <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
           <SheetContent side="left" className="w-72 gap-0 p-0" showCloseButton={false}>
             <SheetHeader className="sr-only">
-              <SheetTitle>Conversations</SheetTitle>
+              <SheetTitle>会話一覧</SheetTitle>
             </SheetHeader>
             <Sidebar data={bootstrap.data} channelId={channelId} navigate={navigate} />
           </SheetContent>
@@ -530,7 +537,7 @@ function App() {
             variant="ghost"
             size="icon"
             className="lg:hidden"
-            aria-label="Open conversations"
+            aria-label="会話一覧を開く"
             onClick={() => setMobileOpen(true)}
           >
             <Menu className="size-5" />
@@ -545,7 +552,7 @@ function App() {
             size="icon"
             className="ml-auto"
             onClick={() => setDark(!dark)}
-            aria-label={dark ? "Use light theme" : "Use dark theme"}
+            aria-label={dark ? "ライトテーマに切り替える" : "ダークテーマに切り替える"}
           >
             {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
           </Button>
@@ -558,7 +565,7 @@ function App() {
           </div>
         ) : bootstrap.isError ? (
           <div className="p-8" role="alert">
-            <h2 className="font-semibold">Could not open archive</h2>
+            <h2 className="font-semibold">アーカイブを開けませんでした</h2>
             <p className="mt-1 text-sm text-destructive">{bootstrap.error.message}</p>
             <Button
               variant="outline"
@@ -566,7 +573,7 @@ function App() {
               className="mt-4"
               onClick={() => void bootstrap.refetch()}
             >
-              Retry
+              再試行
             </Button>
           </div>
         ) : userId ? (
@@ -605,20 +612,20 @@ function App() {
                         id="canvas-panel"
                         role="tabpanel"
                         aria-labelledby={channel.data.canvasPresent ? "tab-canvas" : undefined}
-                        aria-label={channel.data.canvasPresent ? undefined : "Canvas"}
+                        aria-label={channel.data.canvasPresent ? undefined : "キャンバス"}
                         tabIndex={0}
                         className="min-h-0 flex-1"
                       >
                         {channel.data.canvasAvailable ? (
                           <iframe
-                            title={`${channel.data.name} canvas`}
+                            title={`${channel.data.name}のキャンバス`}
                             src={`/archives/${encodeURIComponent(channelId)}/canvas/content`}
                             sandbox="allow-same-origin"
                             className="size-full border-0"
                           />
                         ) : (
                           <p className="p-8 text-sm text-muted-foreground">
-                            Canvas is unavailable because its file was not downloaded.
+                            キャンバスのファイルが保存されていないため表示できません。
                           </p>
                         )}
                       </div>
@@ -650,14 +657,14 @@ function App() {
                 <Separator orientation="vertical" />
                 <aside
                   className="absolute inset-0 z-20 flex flex-col bg-background md:static md:w-[min(42%,28rem)] md:shrink-0"
-                  aria-label="Thread"
+                  aria-label="スレッド"
                 >
                   <div className="flex h-14 shrink-0 items-center justify-between border-b px-4">
-                    <h2 className="font-semibold">Thread</h2>
+                    <h2 className="font-semibold">スレッド</h2>
                     <Button
                       variant="ghost"
                       size="icon-sm"
-                      aria-label="Close thread"
+                      aria-label="スレッドを閉じる"
                       onClick={() => navigate(`/archives/${encodeURIComponent(channelId)}`)}
                     >
                       <X className="size-4" />
@@ -679,16 +686,16 @@ function App() {
             <div className="mb-5 flex size-16 items-center justify-center rounded-2xl bg-primary/10 text-primary">
               <Hash className="size-8" />
             </div>
-            <h2 className="text-xl font-bold">Your archive, ready to explore</h2>
+            <h2 className="text-xl font-bold">会話を選択してください</h2>
             <p className="mt-2 max-w-md text-sm text-muted-foreground">
-              Choose a conversation from the sidebar, or search across the workspace.
+              左の一覧から会話を選ぶか、上の検索欄でメッセージを探してください。
             </p>
             <Button
               variant="outline"
               className="mt-5 lg:hidden"
               onClick={() => setMobileOpen(true)}
             >
-              Browse conversations
+              会話一覧を見る
             </Button>
           </div>
         )}

@@ -116,6 +116,9 @@ func TestSlack_Render(t *testing.T) {
 		if !strings.Contains(got, `class="file-download file-link"`) || !strings.Contains(got, `download="sample.png"`) {
 			t.Fatal("image preview needs a separate download control")
 		}
+		if !strings.Contains(got, "添付ファイル 1件") || !strings.Contains(got, "画像をダウンロード") {
+			t.Fatal("file controls should use Japanese labels")
+		}
 	})
 	t.Run("multiple images share a horizontal gallery", func(t *testing.T) {
 		sm := NewSlack(template.Must(template.New("base").Parse("")), WithRoutes(NewRoutes(ModeLive)))

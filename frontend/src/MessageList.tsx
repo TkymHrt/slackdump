@@ -1,8 +1,8 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import DOMPurify from "dompurify";
-import { MessageCircle, LoaderCircle } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { Check, Copy, MessageCircle, LoaderCircle } from "lucide-react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, type Message, type MessageCursor } from "./api";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -14,6 +14,13 @@ type Props = {
   navigate: (path: string) => void;
   hasTabs?: boolean;
 };
+
+function dateLabel(time: string) {
+  const date = time.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return date;
+  const [year, month, day] = date.split("-");
+  return `${year}年${Number(month)}月${Number(day)}日`;
+}
 
 function MessageRow({
   message,
@@ -30,6 +37,21 @@ function MessageRow({
   const threadPath = `${channelPath}/${encodeURIComponent(message.threadTs || message.ts)}`;
   const messagePath =
     message.threadTs && message.threadTs !== message.ts ? threadPath : channelPath;
+  const messageURL = `${messagePath}#${message.ts}`;
+  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "error">("idle");
+  useEffect(() => {
+    if (copyStatus === "idle") return;
+    const timer = window.setTimeout(() => setCopyStatus("idle"), 2000);
+    return () => window.clearTimeout(timer);
+  }, [copyStatus]);
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(new URL(messageURL, window.location.origin).href);
+      setCopyStatus("copied");
+    } catch {
+      setCopyStatus("error");
+    }
+  };
   const safeHTML = useMemo(
     () =>
       DOMPurify.sanitize(message.html, {
@@ -48,7 +70,7 @@ function MessageRow({
         type="button"
         className="relative mt-0.5 size-10 shrink-0 overflow-hidden rounded-lg bg-muted outline-none focus-visible:ring-2 focus-visible:ring-ring"
         onClick={() => message.userId && navigate(`/team/${encodeURIComponent(message.userId)}`)}
-        aria-label={`View ${message.author}'s profile`}
+        aria-label={`${message.author}のプロフィールを開く`}
         disabled={!message.userId}
       >
         <span
@@ -80,12 +102,40 @@ function MessageRow({
             {message.author}
           </button>
           <a
-            className="text-xs text-muted-foreground hover:underline"
-            href={`${messagePath}#${message.ts}`}
-            title="Link to message"
+            className="text-xs text-primary/80 underline underline-offset-2 hover:text-primary"
+            href={messageURL}
+            aria-label="投稿へのリンクを開く"
+            title="投稿へのリンクを開く"
           >
             {message.time.slice(11, 16)}
           </a>
+          <Button
+            variant="ghost"
+            size="xs"
+            className="h-6 gap-1 px-1 text-xs text-muted-foreground"
+            aria-label="投稿リンクをコピー"
+            title="投稿リンクをコピー"
+            onClick={() => void copyLink()}
+          >
+            {copyStatus === "copied" ? (
+              <Check className="size-3.5" />
+            ) : (
+              <Copy className="size-3.5" />
+            )}
+            <span aria-hidden="true">
+              {copyStatus === "copied" ? "コピーしました" : "リンクをコピー"}
+            </span>
+          </Button>
+          <span
+            role="status"
+            className={copyStatus === "error" ? "text-xs text-destructive" : "sr-only"}
+          >
+            {copyStatus === "copied"
+              ? "コピーしました"
+              : copyStatus === "error"
+                ? "コピーできませんでした"
+                : ""}
+          </span>
         </div>
         <div
           className="message-content break-words text-[0.925rem] leading-relaxed"
@@ -98,7 +148,7 @@ function MessageRow({
             className="mt-2 inline-flex items-center gap-2 rounded-md px-2 py-1 text-xs font-medium text-primary hover:bg-primary/10 focus-visible:outline-2 focus-visible:outline-ring"
           >
             <MessageCircle className="size-4" aria-hidden="true" />
-            {message.replyCount || 0} replies
+            返信 {message.replyCount || 0}件
           </button>
         )}
       </div>
@@ -297,7 +347,7 @@ export default function MessageList({ channelId, threadTs, at, navigate, hasTabs
 
   if (query.isPending) {
     return (
-      <div className="space-y-5 p-8" role="status" aria-label="Loading messages">
+      <div className="space-y-5 p-8" role="status" aria-label="メッセージを読み込み中">
         {Array.from({ length: 5 }, (_, i) => (
           <div key={i} className="flex gap-3">
             <Skeleton className="size-10" />
@@ -313,9 +363,9 @@ export default function MessageList({ channelId, threadTs, at, navigate, hasTabs
   if (query.isError) {
     return (
       <div className="p-8 text-sm text-destructive" role="alert">
-        Could not load messages: {query.error.message}{" "}
+        メッセージを読み込めませんでした：{query.error.message}{" "}
         <Button variant="outline" size="sm" onClick={() => void query.refetch()}>
-          Retry
+          再試行
         </Button>
       </div>
     );
@@ -332,12 +382,12 @@ export default function MessageList({ channelId, threadTs, at, navigate, hasTabs
       <div
         ref={scrollRef}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
-        aria-label={threadTs ? "Thread messages" : "Channel messages"}
+        aria-label={threadTs ? "スレッドのメッセージ" : "チャンネルのメッセージ"}
         tabIndex={0}
       >
         {messages.length === 0 && !root && (
           <div className="flex h-full items-center justify-center p-8 text-center text-sm text-muted-foreground">
-            No messages in this conversation.
+            この会話にはメッセージがありません。
           </div>
         )}
         <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
@@ -359,13 +409,13 @@ export default function MessageList({ channelId, threadTs, at, navigate, hasTabs
                   <div className="flex h-11 items-center justify-center gap-2 text-xs text-muted-foreground">
                     {isFetchingPreviousPage && <LoaderCircle className="size-4 animate-spin" />}
                     {isFetchingPreviousPage
-                      ? "Loading newer messages"
-                      : "Scroll down for newer messages"}
+                      ? "新しいメッセージを読み込み中"
+                      : "下へスクロールすると新しいメッセージを表示"}
                   </div>
                 ) : isRoot && root ? (
                   <div data-thread-root className="border-b bg-muted/30">
                     <div className="px-8 pt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      Original message
+                      元の投稿
                     </div>
                     <MessageRow message={root} channelId={channelId} navigate={navigate} compact />
                   </div>
@@ -374,7 +424,7 @@ export default function MessageList({ channelId, threadTs, at, navigate, hasTabs
                     {(!previous || previous.time.slice(0, 10) !== message.time.slice(0, 10)) && (
                       <div className="relative my-4 border-t text-center">
                         <span className="relative -top-2.5 rounded-full border bg-background px-3 py-1 text-xs font-medium text-muted-foreground">
-                          {message.time.slice(0, 10)}
+                          {dateLabel(message.time)}
                         </span>
                       </div>
                     )}
@@ -388,7 +438,7 @@ export default function MessageList({ channelId, threadTs, at, navigate, hasTabs
                 ) : (
                   <div className="flex h-11 items-center justify-center gap-2 text-xs text-muted-foreground">
                     <LoaderCircle className="size-4 animate-spin" />
-                    Loading older messages
+                    古いメッセージを読み込み中
                   </div>
                 )}
               </div>

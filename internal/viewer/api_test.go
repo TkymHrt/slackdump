@@ -249,7 +249,7 @@ func TestViewer_appHandler(t *testing.T) {
 	defer v.Close()
 	for _, path := range []string{"/", "/archives/C1", "/archives/C1/1710000000.000001", "/team/U1", "/archives/C1/canvas"} {
 		rr := getApp(t, v, path)
-		if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "Slackdump Viewer") {
+		if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "Slackdump ビューワー") || !strings.Contains(rr.Body.String(), `lang="ja"`) {
 			t.Fatalf("%s status=%d body=%s", path, rr.Code, rr.Body.String())
 		}
 	}

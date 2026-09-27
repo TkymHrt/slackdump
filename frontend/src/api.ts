@@ -55,10 +55,17 @@ export type SearchResult = {
 };
 
 async function request<T>(path: string, signal?: AbortSignal, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, { ...init, signal });
+  const response = await fetch(path, { ...init, signal }).catch((error: unknown) => {
+    if (signal?.aborted) throw error;
+    throw new Error("ビューワーに接続できません。");
+  });
   if (!response.ok) {
-    const detail = (await response.text()).trim();
-    throw new Error(detail || `Request failed (${response.status})`);
+    if (response.status === 400 && path.endsWith("/alias")) {
+      throw new Error("別名は30文字以内で、文字・数字・_・-のみ使えます。");
+    }
+    if (response.status === 400) throw new Error("入力内容を確認してください。");
+    if (response.status === 404) throw new Error("対象が見つかりません。");
+    throw new Error(`操作に失敗しました（HTTP ${response.status}）。`);
   }
   return (await response.json()) as T;
 }

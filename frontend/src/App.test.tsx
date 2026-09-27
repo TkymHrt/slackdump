@@ -104,7 +104,7 @@ test("navigates channels without carrying a message position", async () => {
 
 test("opens a search hit in its thread at the matching reply", async () => {
   renderApp();
-  const input = await screen.findByRole("searchbox", { name: "Search messages" });
+  const input = await screen.findByRole("searchbox", { name: "メッセージを検索" });
   fireEvent.change(input, { target: { value: "found" } });
   const hit = await screen.findByRole("button", { name: /found reply/ });
   fireEvent.click(hit);
