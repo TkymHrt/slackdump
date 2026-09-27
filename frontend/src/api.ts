@@ -33,8 +33,12 @@ export type MessagePage = {
   messages: Message[];
   nextBefore?: string;
   hasMore: boolean;
+  nextAfter?: string;
+  hasNewer: boolean;
   root?: Message;
 };
+
+export type MessageCursor = { before?: string; after?: string; at?: string };
 
 export type User = {
   id: string;
@@ -63,19 +67,21 @@ export const api = {
   bootstrap: (signal?: AbortSignal) => request<Bootstrap>("/api/bootstrap", signal),
   channel: (id: string, signal?: AbortSignal) =>
     request<Channel>(`/api/channels/${encodeURIComponent(id)}`, signal),
-  messages: (id: string, cursor?: string, at?: string, signal?: AbortSignal) => {
+  messages: (id: string, cursor: MessageCursor = {}, signal?: AbortSignal) => {
     const query = new URLSearchParams();
-    if (cursor) query.set("before", cursor);
-    else if (at) query.set("at", at);
+    if (cursor.before) query.set("before", cursor.before);
+    else if (cursor.after) query.set("after", cursor.after);
+    else if (cursor.at) query.set("at", cursor.at);
     return request<MessagePage>(
       `/api/channels/${encodeURIComponent(id)}/messages?${query}`,
       signal,
     );
   },
-  thread: (id: string, ts: string, cursor?: string, at?: string, signal?: AbortSignal) => {
+  thread: (id: string, ts: string, cursor: MessageCursor = {}, signal?: AbortSignal) => {
     const query = new URLSearchParams();
-    if (cursor) query.set("before", cursor);
-    else if (at) query.set("at", at);
+    if (cursor.before) query.set("before", cursor.before);
+    else if (cursor.after) query.set("after", cursor.after);
+    else if (cursor.at) query.set("at", cursor.at);
     return request<MessagePage>(
       `/api/channels/${encodeURIComponent(id)}/threads/${encodeURIComponent(ts)}?${query}`,
       signal,

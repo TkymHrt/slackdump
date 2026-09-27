@@ -48,21 +48,49 @@ test.beforeEach(async ({ page }) => {
     if (url.pathname === "/api/channels/C1/messages") {
       const before = url.searchParams.get("before");
       const at = url.searchParams.get("at");
+      const after = url.searchParams.get("after");
       const subset = messages.filter((message) =>
-        before ? message.ts < before : at ? message.ts <= at : true,
+        before ? message.ts < before : after ? message.ts > after : at ? message.ts <= at : true,
       );
-      const page = subset.slice(-80);
+      const page = after ? subset.slice(0, 80) : subset.slice(-80);
+      const hasNewer = after
+        ? subset.length > 80
+        : at
+          ? messages.some((message) => message.ts > at)
+          : false;
       await route.fulfill({
         json: {
           messages: page,
-          hasMore: subset.length > 80,
-          nextBefore: subset.length > 80 ? page[0].ts : undefined,
+          hasMore: !after && subset.length > 80,
+          nextBefore: !after && subset.length > 80 ? page[0].ts : undefined,
+          hasNewer,
+          nextAfter: hasNewer ? page.at(-1)?.ts || at : undefined,
         },
       });
       return;
     }
     if (url.pathname === `/api/channels/C1/threads/${ts(100)}`) {
-      await route.fulfill({ json: { root: messages[99], messages: [reply], hasMore: false } });
+      const at = url.searchParams.get("at");
+      const after = url.searchParams.get("after");
+      const threadMessages = after
+        ? reply.ts > after
+          ? [reply]
+          : []
+        : at
+          ? reply.ts <= at
+            ? [reply]
+            : []
+          : [reply];
+      const hasNewer = !!at && reply.ts > at;
+      await route.fulfill({
+        json: {
+          root: messages[99],
+          messages: threadMessages,
+          hasMore: false,
+          hasNewer,
+          nextAfter: hasNewer ? at : undefined,
+        },
+      });
       return;
     }
     if (url.pathname === "/api/search") {
@@ -126,9 +154,7 @@ test("loads older history, keeps the scroll position, and opens a search hit", a
 test("opens an older message link and shows its target", async ({ page }) => {
   await page.goto(`/archives/C1#${ts(45)}`);
   await expect(page.getByText("message 45")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Jump to latest" })).toBeVisible();
-  await page.getByRole("button", { name: "Jump to latest" }).click();
-  await expect(page.getByText("message 205")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Jump to latest" })).toHaveCount(0);
 });
 
 test("filters conversations from the mobile sidebar", async ({ page }) => {
@@ -239,4 +265,142 @@ test("clicking an inline image does not download; download is explicit", async (
   const download = page.waitForEvent("download");
   await page.getByRole("link", { name: "Download sample.png" }).click();
   expect((await download).suggestedFilename()).toBe("sample.png");
+});
+
+test("restored channel position can scroll forward without a latest button", async ({ page }) => {
+  await page.addInitScript(() => {
+    if (!sessionStorage.getItem("viewer:anchor:C1"))
+      sessionStorage.setItem("viewer:anchor:C1", "1710000000.000045");
+  });
+  await page.goto("/archives/C1");
+  await expect(page.getByText("message 45")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Jump to latest" })).toHaveCount(0);
+  const newer = page.waitForResponse(
+    (response) => response.url().includes("/messages?after=") && response.status() === 200,
+  );
+  const scroller = page.getByLabel("Channel messages");
+  await scroller.hover();
+  await page.mouse.wheel(0, 600);
+  await newer;
+  await expect(page.getByText("message 46")).toBeVisible();
+  const latest = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).searchParams.get("after") === ts(125) && response.status() === 200,
+  );
+  await scroller.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+    element.dispatchEvent(new Event("scroll"));
+  });
+  await page.mouse.wheel(0, 600);
+  await latest;
+  await scroller.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+    element.dispatchEvent(new Event("scroll"));
+  });
+  await expect(page.getByText("message 205")).toBeVisible();
+  await page.mouse.wheel(0, 100);
+  await expect
+    .poll(async () =>
+      Number(
+        (await page.evaluate(() => sessionStorage.getItem("viewer:anchor:C1")))?.split(".")[1] || 0,
+      ),
+    )
+    .toBeGreaterThanOrEqual(190);
+  const saved = await page.evaluate(() => sessionStorage.getItem("viewer:anchor:C1"));
+  expect(saved).toMatch(/^1710000000\.\d{6}$/);
+  await page.reload();
+  await expect(page.locator(`article[id="${saved}"]`)).toBeVisible();
+});
+
+test("a stale saved position can still scroll into available history", async ({ page }) => {
+  await page.goto("/archives/C1#1000000000.000001");
+  const scroller = page.getByLabel("Channel messages");
+  await scroller.hover();
+  const newer = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).searchParams.get("after") === "1000000000.000001" &&
+      response.status() === 200,
+    { timeout: 3000 },
+  );
+  await page.mouse.wheel(0, 600);
+  await newer;
+  await expect(page.getByText("message 1", { exact: true })).toBeVisible();
+});
+
+test("a thread deep link can scroll into newer replies", async ({ page }) => {
+  const threadTS = ts(100);
+  const stamp = (n: number) => `1710000001.${String(n).padStart(6, "0")}`;
+  const replies = Array.from({ length: 205 }, (_, i) => ({
+    ...reply,
+    ts: stamp(i + 1),
+    html: `<p>reply ${i + 1}</p>`,
+  }));
+  await page.route(`**/api/channels/C1/threads/${threadTS}*`, (route) => {
+    const url = new URL(route.request().url());
+    const before = url.searchParams.get("before");
+    const after = url.searchParams.get("after");
+    const at = url.searchParams.get("at");
+    const matching = replies.filter((message) =>
+      before ? message.ts < before : after ? message.ts > after : at ? message.ts <= at : true,
+    );
+    const visible = after ? matching.slice(0, 80) : matching.slice(-80);
+    const hasNewer = after
+      ? matching.length > 80
+      : at
+        ? replies.some((message) => message.ts > at)
+        : false;
+    return route.fulfill({
+      json: {
+        root: messages[99],
+        messages: visible,
+        hasMore: !after && matching.length > 80,
+        nextBefore: !after && matching.length > 80 ? visible[0].ts : undefined,
+        hasNewer,
+        nextAfter: hasNewer ? visible.at(-1)?.ts || at : undefined,
+      },
+    });
+  });
+  await page.goto(`/archives/C1/${threadTS}#${stamp(45)}`);
+  await expect(page.getByText("reply 45", { exact: true })).toBeVisible();
+  const scroller = page.getByLabel("Thread messages");
+  const newer = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).searchParams.get("after") === stamp(45) && response.status() === 200,
+  );
+  await scroller.hover();
+  await page.mouse.wheel(0, 600);
+  await newer;
+  await expect(page.getByText("reply 46", { exact: true })).toBeVisible();
+});
+
+test("multiple images in one message form a horizontal gallery", async ({ page }) => {
+  await page.setViewportSize({ width: 600, height: 700 });
+  const previews = Array.from({ length: 3 }, (_, index) => {
+    const path = `/slackdump/file/F${index + 1}/picture.png`;
+    return `<div class="file-preview-container"><img class="file-image" src="${path}" alt="picture ${index + 1}" width="240" height="140"><div><a class="file-download file-link" href="${path}" download="picture.png">Download image</a></div></div>`;
+  }).join("");
+  await page.route("**/api/channels/C1/messages*", (route) =>
+    route.fulfill({
+      json: {
+        messages: [
+          {
+            ...messages[0],
+            html: `<section class="slack-files"><p>3 files:</p><div class="file-items multi">${previews}</div></section>`,
+          },
+        ],
+        hasMore: false,
+      },
+    }),
+  );
+  await page.goto("/archives/C1");
+  const cards = page.locator(".file-preview-container");
+  await expect(cards).toHaveCount(3);
+  const first = await cards.nth(0).boundingBox();
+  const second = await cards.nth(1).boundingBox();
+  expect(first && second).toBeTruthy();
+  expect(Math.abs(first!.y - second!.y)).toBeLessThan(20);
+  expect(second!.x).toBeGreaterThan(first!.x);
+  const gallery = page.locator(".file-items");
+  await expect(gallery).toBeVisible();
+  expect(await gallery.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
 });

@@ -1,6 +1,7 @@
 {{if . }}
 <section class="slack-files">
     <p>{{len .}} files:</p>
+    <div class="file-items{{if gt (len .) 1}} multi{{end}}">
     {{ range $i, $f := . }}
     {{ if $f.ID }}
     {{ $path := fileurl $f.ID $f.Name }}
@@ -34,5 +35,6 @@
     {{ end }}{{/* hidden_by_limit */}}
     {{ end }}{{/* f.ID */}}
     {{ end }}{{/* range */}}
+    </div>
 </section>
 {{end}}

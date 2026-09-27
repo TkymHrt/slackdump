@@ -1,9 +1,9 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import DOMPurify from "dompurify";
-import { MessageCircle, ArrowDown, LoaderCircle } from "lucide-react";
+import { MessageCircle, LoaderCircle } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import { api, type Message } from "./api";
+import { api, type Message, type MessageCursor } from "./api";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -120,32 +120,51 @@ export default function MessageList({
   const scrollRef = useRef<HTMLDivElement>(null);
   const initialized = useRef(false);
   const pendingPrepend = useRef<{ total: number; top: number; rootEnd?: number } | null>(null);
+  const pendingAppend = useRef<{ total: number; top: number } | null>(null);
+  const lastScrollTop = useRef(0);
+  const initialPageParam: MessageCursor = { at };
   const query = useInfiniteQuery({
     queryKey: ["messages", channelId, threadTs || "", at || "latest"],
-    initialPageParam: "",
+    initialPageParam,
     queryFn: ({ pageParam, signal }) =>
       threadTs
-        ? api.thread(channelId, threadTs, pageParam, at, signal)
-        : api.messages(channelId, pageParam, at, signal),
-    getNextPageParam: (lastPage) => (lastPage.hasMore ? lastPage.nextBefore : undefined),
+        ? api.thread(channelId, threadTs, pageParam, signal)
+        : api.messages(channelId, pageParam, signal),
+    getPreviousPageParam: (firstPage): MessageCursor | undefined =>
+      firstPage.hasNewer && firstPage.nextAfter ? { after: firstPage.nextAfter } : undefined,
+    getNextPageParam: (lastPage): MessageCursor | undefined =>
+      lastPage.hasMore && lastPage.nextBefore ? { before: lastPage.nextBefore } : undefined,
   });
-  const { fetchNextPage, hasNextPage, isFetchingNextPage } = query;
+  const {
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    fetchPreviousPage,
+    hasPreviousPage,
+    isFetchingPreviousPage,
+  } = query;
   const messages = useMemo(
     () => (query.data ? [...query.data.pages].reverse().flatMap((page) => page.messages) : []),
     [query.data],
   );
   const root = query.data?.pages[0]?.root;
   const loaderCount = hasNextPage ? 1 : 0;
+  const newerLoaderCount = hasPreviousPage ? 1 : 0;
   const rootCount = threadTs && root ? 1 : 0;
   const messageOffset = loaderCount + rootCount;
   const virtualizer = useVirtualizer({
-    count: messages.length + messageOffset,
+    count: messages.length + messageOffset + newerLoaderCount,
     getScrollElement: () => scrollRef.current,
-    estimateSize: (index) =>
-      loaderCount && index === 0 ? 46 : rootCount && index === loaderCount ? 180 : 104,
+    estimateSize: (index) => {
+      if (loaderCount && index === 0) return 46;
+      if (newerLoaderCount && index === messages.length + messageOffset) return 46;
+      if (rootCount && index === loaderCount) return 180;
+      return 104;
+    },
     getItemKey: (index) => {
       if (loaderCount && index === 0) return "loader";
       if (rootCount && index === loaderCount) return `thread-root-${root?.ts}`;
+      if (newerLoaderCount && index === messages.length + messageOffset) return "newer-loader";
       return messages[index - messageOffset]?.ts || index;
     },
     overscan: 8,
@@ -160,33 +179,66 @@ export default function MessageList({
         previous.rootEnd !== undefined && previous.top < previous.rootEnd
           ? previous.top
           : previous.top + virtualizer.getTotalSize() - previous.total;
+      lastScrollTop.current = node.scrollTop;
       pendingPrepend.current = null;
       return;
     }
-    if (initialized.current || (messages.length === 0 && !root)) return;
+    if (pendingAppend.current) {
+      const previous = pendingAppend.current;
+      const growth = Math.max(0, virtualizer.getTotalSize() - previous.total);
+      node.scrollTop = previous.top + Math.min(growth, 120);
+      lastScrollTop.current = node.scrollTop;
+      pendingAppend.current = null;
+      return;
+    }
+    if (initialized.current || (messages.length === 0 && !root && !hasPreviousPage)) return;
     const initialScrollTop = getInitialScrollTop?.();
     if (initialScrollTop !== undefined) {
       requestAnimationFrame(() => {
         node.scrollTop = initialScrollTop;
+        lastScrollTop.current = node.scrollTop;
         initialized.current = true;
         node.dispatchEvent(new Event("scroll"));
       });
       return;
     }
     const target = at ? messages.findIndex((message) => message.ts === at) : -1;
-    requestAnimationFrame(() => {
-      virtualizer.scrollToIndex(
-        target >= 0
-          ? target + messageOffset
-          : messages.length > 0
-            ? messages.length - 1 + messageOffset
-            : loaderCount,
-        {
-          align: target >= 0 ? "center" : messages.length > 0 ? "end" : "start",
-        },
-      );
+    const finish = () => {
+      lastScrollTop.current = node.scrollTop;
       initialized.current = true;
       node.dispatchEvent(new Event("scroll"));
+    };
+    if (at && target >= 0) {
+      const index = target + messageOffset;
+      const align = (attempt: number) => {
+        virtualizer.scrollToIndex(index, { align: "center" });
+        requestAnimationFrame(() => {
+          const row = Array.from(node.querySelectorAll<HTMLElement>("article[id]")).find(
+            (element) => element.id === at,
+          );
+          if (!row && attempt < 5) {
+            align(attempt + 1);
+            return;
+          }
+          if (row) {
+            const desired = Math.max(0, (node.clientHeight - row.offsetHeight) / 2);
+            node.scrollTop +=
+              row.getBoundingClientRect().top - node.getBoundingClientRect().top - desired;
+          }
+          finish();
+        });
+      };
+      requestAnimationFrame(() => align(0));
+      return;
+    }
+    requestAnimationFrame(() => {
+      virtualizer.scrollToIndex(
+        messages.length > 0 ? messages.length - 1 + messageOffset : loaderCount,
+        {
+          align: messages.length > 0 ? "end" : "start",
+        },
+      );
+      finish();
     });
   }, [
     query.data,
@@ -195,9 +247,58 @@ export default function MessageList({
     loaderCount,
     messageOffset,
     root,
+    hasPreviousPage,
     virtualizer,
     getInitialScrollTop,
   ]);
+
+  useEffect(() => {
+    const node = scrollRef.current;
+    if (!node || !hasPreviousPage || isFetchingPreviousPage) return;
+    const loadNewer = () => {
+      if (!initialized.current || pendingAppend.current) return;
+      if (node.scrollHeight - node.clientHeight - node.scrollTop > 350) return;
+      pendingAppend.current = { total: virtualizer.getTotalSize(), top: node.scrollTop };
+      void fetchPreviousPage();
+    };
+    const onScroll = () => {
+      const current = node.scrollTop;
+      const movingDown = current > lastScrollTop.current + 1;
+      lastScrollTop.current = current;
+      if (movingDown) loadNewer();
+    };
+    const onWheel = (event: WheelEvent) => {
+      if (event.deltaY > 0) loadNewer();
+    };
+    let touchY = 0;
+    const onTouchStart = (event: TouchEvent) => {
+      touchY = event.touches[0]?.clientY || 0;
+    };
+    const onTouchMove = (event: TouchEvent) => {
+      const y = event.touches[0]?.clientY || 0;
+      if (y < touchY - 2) loadNewer();
+      touchY = y;
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        ["ArrowDown", "PageDown", "End"].includes(event.key) ||
+        (event.key === " " && !event.shiftKey)
+      )
+        loadNewer();
+    };
+    node.addEventListener("scroll", onScroll, { passive: true });
+    node.addEventListener("wheel", onWheel, { passive: true });
+    node.addEventListener("touchstart", onTouchStart, { passive: true });
+    node.addEventListener("touchmove", onTouchMove, { passive: true });
+    node.addEventListener("keydown", onKeyDown);
+    return () => {
+      node.removeEventListener("scroll", onScroll);
+      node.removeEventListener("wheel", onWheel);
+      node.removeEventListener("touchstart", onTouchStart);
+      node.removeEventListener("touchmove", onTouchMove);
+      node.removeEventListener("keydown", onKeyDown);
+    };
+  }, [hasPreviousPage, isFetchingPreviousPage, fetchPreviousPage, virtualizer]);
 
   useEffect(() => {
     const node = scrollRef.current;
@@ -228,17 +329,46 @@ export default function MessageList({
     if (threadTs) return;
     const node = scrollRef.current;
     if (!node) return;
+    let frame = 0;
     const saveAnchor = () => {
-      onScrollTop?.(node.scrollTop);
-      const first = virtualizer
-        .getVirtualItems()
-        .find((item) => item.index >= loaderCount && item.end >= node.scrollTop);
-      const message = first && messages[first.index - loaderCount];
-      if (message) sessionStorage.setItem(`viewer:anchor:${channelId}`, message.ts);
+      if (!initialized.current) return;
+      const viewport = node.getBoundingClientRect();
+      const visible = Array.from(node.querySelectorAll<HTMLElement>("article[id]")).find((row) => {
+        const rect = row.getBoundingClientRect();
+        return rect.bottom > viewport.top + 1 && rect.top < viewport.bottom - 1;
+      });
+      if (visible) sessionStorage.setItem(`viewer:anchor:${channelId}`, visible.id);
     };
-    node.addEventListener("scroll", saveAnchor, { passive: true });
-    return () => node.removeEventListener("scroll", saveAnchor);
-  }, [channelId, threadTs, messages, loaderCount, virtualizer, onScrollTop]);
+    const scheduleSave = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        frame = requestAnimationFrame(saveAnchor);
+      });
+    };
+    const onScroll = () => onScrollTop?.(node.scrollTop);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key))
+        scheduleSave();
+    };
+    const onPointerMove = (event: PointerEvent) => {
+      if (event.buttons) scheduleSave();
+    };
+    node.addEventListener("scroll", onScroll, { passive: true });
+    node.addEventListener("wheel", scheduleSave, { passive: true });
+    node.addEventListener("touchmove", scheduleSave, { passive: true });
+    node.addEventListener("pointerdown", scheduleSave);
+    node.addEventListener("pointermove", onPointerMove);
+    node.addEventListener("keydown", onKeyDown);
+    return () => {
+      cancelAnimationFrame(frame);
+      node.removeEventListener("scroll", onScroll);
+      node.removeEventListener("wheel", scheduleSave);
+      node.removeEventListener("touchmove", scheduleSave);
+      node.removeEventListener("pointerdown", scheduleSave);
+      node.removeEventListener("pointermove", onPointerMove);
+      node.removeEventListener("keydown", onKeyDown);
+    };
+  }, [channelId, threadTs, messages.length, onScrollTop]);
 
   if (query.isPending) {
     return (
@@ -278,6 +408,7 @@ export default function MessageList({
         ref={scrollRef}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
         aria-label={threadTs ? "Thread messages" : "Channel messages"}
+        tabIndex={0}
       >
         {messages.length === 0 && !root && (
           <div className="flex h-full items-center justify-center p-8 text-center text-sm text-muted-foreground">
@@ -287,6 +418,8 @@ export default function MessageList({
         <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
           {virtualizer.getVirtualItems().map((item) => {
             const isRoot = !!rootCount && item.index === loaderCount;
+            const isNewerLoader =
+              !!newerLoaderCount && item.index === messages.length + messageOffset;
             const message = messages[item.index - messageOffset];
             const previous = messages[item.index - messageOffset - 1];
             return (
@@ -297,7 +430,14 @@ export default function MessageList({
                 className="absolute left-0 top-0 w-full"
                 style={{ transform: `translateY(${item.start}px)` }}
               >
-                {isRoot && root ? (
+                {isNewerLoader ? (
+                  <div className="flex h-11 items-center justify-center gap-2 text-xs text-muted-foreground">
+                    {isFetchingPreviousPage && <LoaderCircle className="size-4 animate-spin" />}
+                    {isFetchingPreviousPage
+                      ? "Loading newer messages"
+                      : "Scroll down for newer messages"}
+                  </div>
+                ) : isRoot && root ? (
                   <div data-thread-root className="border-b bg-muted/30">
                     <div className="px-8 pt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                       Original message
@@ -331,20 +471,6 @@ export default function MessageList({
           })}
         </div>
       </div>
-      {at && !threadTs && (
-        <Button
-          variant="secondary"
-          size="sm"
-          className="absolute bottom-5 right-5 shadow-md"
-          onClick={() => {
-            sessionStorage.removeItem(`viewer:anchor:${channelId}`);
-            navigate(`/archives/${encodeURIComponent(channelId)}?latest=1`);
-          }}
-        >
-          <ArrowDown className="size-4" />
-          Jump to latest
-        </Button>
-      )}
     </div>
   );
 }

@@ -41,7 +41,7 @@ func TestViewer_apiMessages(t *testing.T) {
 	v := testApp(t, src)
 	defer v.Close()
 
-	var first, second, last apiMessagePage
+	var first, second, last, newer apiMessagePage
 	for _, tc := range []struct {
 		path string
 		into *apiMessagePage
@@ -49,6 +49,7 @@ func TestViewer_apiMessages(t *testing.T) {
 		{"/api/channels/C1/messages", &first},
 		{"/api/channels/C1/messages?before=1710000000.000126", &second},
 		{"/api/channels/C1/messages?at=1710000000.000045", &last},
+		{"/api/channels/C1/messages?after=1710000000.000045", &newer},
 	} {
 		rr := getApp(t, v, tc.path)
 		if rr.Code != http.StatusOK {
@@ -70,9 +71,31 @@ func TestViewer_apiMessages(t *testing.T) {
 	if len(last.Messages) != 45 || last.Messages[44].TS != "1710000000.000045" || last.HasMore {
 		t.Fatalf("anchored page: %+v", last)
 	}
+	if !last.HasNewer || last.NextAfter != "1710000000.000045" || first.HasNewer {
+		t.Fatalf("newer cursor state: anchored=%+v latest=%+v", last, first)
+	}
+	if len(newer.Messages) != 80 {
+		t.Fatalf("newer page length = %d, want 80", len(newer.Messages))
+	}
+	if newer.Messages[0].TS != "1710000000.000046" || newer.Messages[79].TS != "1710000000.000125" {
+		t.Fatalf("newer page: first=%+v last=%+v", newer.Messages[0], newer.Messages[len(newer.Messages)-1])
+	}
+	if !newer.HasNewer || newer.NextAfter != "1710000000.000125" {
+		t.Fatalf("newer page cursor: %+v", newer)
+	}
+	finished := getApp(t, v, "/api/channels/C1/messages?after=1710000000.000125")
+	var finalPage apiMessagePage
+	if err := json.Unmarshal(finished.Body.Bytes(), &finalPage); err != nil {
+		t.Fatal(err)
+	}
+	if finalPage.HasNewer || len(finalPage.Messages) != 80 || finalPage.Messages[79].TS != "1710000000.000205" {
+		t.Fatalf("final newer page: %+v", finalPage)
+	}
 	for _, path := range []string{
 		"/api/channels/C1/messages?before=bad",
+		"/api/channels/C1/messages?after=bad",
 		"/api/channels/C1/messages?before=1710000000.000001&at=1710000000.000002",
+		"/api/channels/C1/messages?before=1710000000.000001&after=1710000000.000002",
 	} {
 		if rr := getApp(t, v, path); rr.Code != http.StatusBadRequest {
 			t.Fatalf("%s status = %d, want 400", path, rr.Code)
@@ -118,6 +141,20 @@ func TestViewer_apiBootstrap(t *testing.T) {
 			if err := json.Unmarshal(rr.Body.Bytes(), &page); err != nil {
 				t.Fatal(err)
 			}
+			if len(page.Messages) > 1 {
+				after := page.Messages[0].TS
+				rr = getApp(t, v, "/api/channels/"+data.Channels[0].ID+"/messages?after="+after)
+				if rr.Code != http.StatusOK {
+					t.Fatalf("newer messages status=%d body=%s", rr.Code, rr.Body.String())
+				}
+				var newer apiMessagePage
+				if err := json.Unmarshal(rr.Body.Bytes(), &newer); err != nil {
+					t.Fatal(err)
+				}
+				if len(newer.Messages) == 0 || newer.Messages[0].TS <= after {
+					t.Fatalf("newer page did not advance past cursor")
+				}
+			}
 			rr = getApp(t, v, "/api/search?q=hello")
 			if rr.Code != http.StatusOK {
 				t.Fatalf("search status=%d body=%s", rr.Code, rr.Body.String())
@@ -140,6 +177,34 @@ func TestViewer_apiThread(t *testing.T) {
 	if page.Root == nil || page.Root.TS != "1710000000.000001" || len(page.Messages) != 1 || page.Messages[0].TS != "1710000001.000001" {
 		t.Fatalf("thread page = %+v", page)
 	}
+	t.Run("forward pagination", func(t *testing.T) {
+		src := newViewerRouteSource()
+		const threadTS = "1710000000.000001"
+		root := src.threads["C1"][threadTS][0]
+		thread := []slack.Message{root}
+		for i := 1; i <= 205; i++ {
+			thread = append(thread, slack.Message{Msg: slack.Msg{Timestamp: fmt.Sprintf("1710000001.%06d", i), ThreadTimestamp: threadTS, Text: "reply"}})
+		}
+		src.threads["C1"][threadTS] = thread
+		viewer := testApp(t, src)
+		defer viewer.Close()
+		anchored := getApp(t, viewer, "/api/channels/C1/threads/"+threadTS+"?at=1710000001.000045")
+		var start apiMessagePage
+		if err := json.Unmarshal(anchored.Body.Bytes(), &start); err != nil {
+			t.Fatal(err)
+		}
+		if !start.HasNewer || start.NextAfter != "1710000001.000045" || start.Root == nil {
+			t.Fatalf("anchored thread cursor: %+v", start)
+		}
+		rr := getApp(t, viewer, "/api/channels/C1/threads/"+threadTS+"?after="+start.NextAfter)
+		var newer apiMessagePage
+		if err := json.Unmarshal(rr.Body.Bytes(), &newer); err != nil {
+			t.Fatal(err)
+		}
+		if len(newer.Messages) != 80 || newer.Messages[0].TS != "1710000001.000046" || newer.Messages[79].TS != "1710000001.000125" || !newer.HasNewer {
+			t.Fatalf("newer thread page: %+v", newer)
+		}
+	})
 }
 
 func TestViewer_apiSearch(t *testing.T) {

@@ -649,6 +649,19 @@ func TestSource_PageMessages(t *testing.T) {
 		require.Len(t, got, 1)
 		assert.Equal(t, third.Timestamp, got[0].Timestamp)
 	})
+	t.Run("newer page retains timeline and deduplicates", func(t *testing.T) {
+		got, newer, err := s.PageMessagesAfter(t.Context(), channelID, 1700000000000001, 2)
+		require.NoError(t, err)
+		require.True(t, newer)
+		require.Len(t, got, 2)
+		assert.Equal(t, []string{parent.Timestamp, third.Timestamp}, []string{got[0].Timestamp, got[1].Timestamp})
+		assert.Equal(t, "updated third", got[1].Text)
+		got, newer, err = s.PageMessagesAfter(t.Context(), channelID, 1700000000000003, 2)
+		require.NoError(t, err)
+		require.False(t, newer)
+		require.Len(t, got, 1)
+		assert.Equal(t, fourth.Timestamp, got[0].Timestamp)
+	})
 }
 
 func TestSource_SearchMessages(t *testing.T) {

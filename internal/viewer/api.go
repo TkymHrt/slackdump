@@ -54,6 +54,8 @@ type apiMessagePage struct {
 	Messages   []apiMessageData `json:"messages"`
 	NextBefore string           `json:"nextBefore,omitempty"`
 	HasMore    bool             `json:"hasMore"`
+	NextAfter  string           `json:"nextAfter,omitempty"`
+	HasNewer   bool             `json:"hasNewer"`
 	Root       *apiMessageData  `json:"root,omitempty"`
 }
 
@@ -64,6 +66,7 @@ type pageItem struct {
 
 type pagedMessagesSource interface {
 	PageMessages(ctx context.Context, channelID string, bound int64, inclusive bool, limit int) ([]slack.Message, bool, error)
+	PageMessagesAfter(ctx context.Context, channelID string, bound int64, limit int) ([]slack.Message, bool, error)
 }
 
 type searchableMessagesSource interface {
@@ -92,20 +95,42 @@ func apiTimestamp(raw string) (int64, error) {
 	return n, nil
 }
 
-func pageBound(r *http.Request) (int64, bool, error) {
-	before, at := r.URL.Query().Get("before"), r.URL.Query().Get("at")
-	if before != "" && at != "" {
-		return 0, false, errors.New("before and at cannot be combined")
+type pageRequest struct {
+	bound     int64
+	inclusive bool
+	newer     bool
+	anchored  bool
+	raw       string
+}
+
+func pageBound(r *http.Request) (pageRequest, error) {
+	query := r.URL.Query()
+	before, at, after := query.Get("before"), query.Get("at"), query.Get("after")
+	count := 0
+	for _, value := range []string{before, at, after} {
+		if value != "" {
+			count++
+		}
 	}
-	if before != "" {
-		n, err := apiTimestamp(before)
-		return n, false, err
+	if count > 1 {
+		return pageRequest{}, errors.New("before, at, and after cannot be combined")
 	}
-	if at != "" {
-		n, err := apiTimestamp(at)
-		return n, true, err
+	for _, candidate := range []struct {
+		value string
+		page  pageRequest
+	}{
+		{before, pageRequest{}},
+		{at, pageRequest{inclusive: true, anchored: true}},
+		{after, pageRequest{newer: true}},
+	} {
+		if candidate.value != "" {
+			bound, err := apiTimestamp(candidate.value)
+			candidate.page.bound = bound
+			candidate.page.raw = candidate.value
+			return candidate.page, err
+		}
 	}
-	return int64(^uint64(0) >> 1), false, nil
+	return pageRequest{bound: int64(^uint64(0) >> 1)}, nil
 }
 
 func addPageItem(items []pageItem, item pageItem, limit int) []pageItem {
@@ -124,7 +149,50 @@ func addPageItem(items []pageItem, item pageItem, limit int) []pageItem {
 	return items
 }
 
-func collectPage(ctx context.Context, seq iter.Seq2[slack.Message, error], bound int64, inclusive bool, limit int, skipTS string) ([]slack.Message, bool, *slack.Message, error) {
+func collectPage(ctx context.Context, seq iter.Seq2[slack.Message, error], bound int64, inclusive bool, limit int, skipTS string) ([]slack.Message, bool, bool, *slack.Message, error) {
+	items := make([]pageItem, 0, limit+1)
+	var root *slack.Message
+	var sawNewer bool
+	if seq != nil {
+		for msg, err := range seq {
+			if err != nil {
+				return nil, false, false, nil, err
+			}
+			if err := ctx.Err(); err != nil {
+				return nil, false, false, nil, err
+			}
+			if msg.Timestamp == skipTS {
+				copy := msg
+				root = &copy
+				continue
+			}
+			key, err := apiTimestamp(msg.Timestamp)
+			if err != nil {
+				continue
+			}
+			if key > bound {
+				sawNewer = true
+				continue
+			}
+			if !inclusive && key == bound {
+				continue
+			}
+			items = addPageItem(items, pageItem{key: key, msg: msg}, limit)
+		}
+	}
+	slices.SortFunc(items, func(a, b pageItem) int { return cmp.Compare(a.key, b.key) })
+	hasMore := len(items) > limit
+	if hasMore {
+		items = items[1:]
+	}
+	result := make([]slack.Message, 0, len(items))
+	for _, item := range items {
+		result = append(result, item.msg)
+	}
+	return result, hasMore, sawNewer, root, nil
+}
+
+func collectPageAfter(ctx context.Context, seq iter.Seq2[slack.Message, error], bound int64, limit int, skipTS string) ([]slack.Message, bool, *slack.Message, error) {
 	items := make([]pageItem, 0, limit+1)
 	var root *slack.Message
 	if seq != nil {
@@ -141,22 +209,34 @@ func collectPage(ctx context.Context, seq iter.Seq2[slack.Message, error], bound
 				continue
 			}
 			key, err := apiTimestamp(msg.Timestamp)
-			if err != nil || key > bound || (!inclusive && key == bound) {
+			if err != nil || key <= bound {
 				continue
 			}
-			items = addPageItem(items, pageItem{key: key, msg: msg}, limit)
+			if len(items) < limit+1 {
+				items = append(items, pageItem{key: key, msg: msg})
+				continue
+			}
+			latest := 0
+			for i := 1; i < len(items); i++ {
+				if items[i].key > items[latest].key {
+					latest = i
+				}
+			}
+			if key < items[latest].key {
+				items[latest] = pageItem{key: key, msg: msg}
+			}
 		}
 	}
 	slices.SortFunc(items, func(a, b pageItem) int { return cmp.Compare(a.key, b.key) })
-	hasMore := len(items) > limit
-	if hasMore {
-		items = items[1:]
+	hasNewer := len(items) > limit
+	if hasNewer {
+		items = items[:limit]
 	}
 	result := make([]slack.Message, 0, len(items))
 	for _, item := range items {
 		result = append(result, item.msg)
 	}
-	return result, hasMore, root, nil
+	return result, hasNewer, root, nil
 }
 
 func (v *Viewer) messageData(ctx context.Context, msg slack.Message) apiMessageData {
@@ -265,19 +345,30 @@ func (v *Viewer) apiMessages(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	bound, inclusive, err := pageBound(r)
+	pageReq, err := pageBound(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	if pager, ok := v.src.(pagedMessagesSource); ok {
-		msgs, hasMore, err := pager.PageMessages(r.Context(), ch.ID, bound, inclusive, pageSize)
+		var msgs []slack.Message
+		var hasMore, hasNewer bool
+		if pageReq.newer {
+			msgs, hasNewer, err = pager.PageMessagesAfter(r.Context(), ch.ID, pageReq.bound, pageSize)
+		} else {
+			msgs, hasMore, err = pager.PageMessages(r.Context(), ch.ID, pageReq.bound, pageReq.inclusive, pageSize)
+			if err == nil && pageReq.anchored {
+				var probe []slack.Message
+				probe, _, err = pager.PageMessagesAfter(r.Context(), ch.ID, pageReq.bound, 1)
+				hasNewer = len(probe) > 0
+			}
+		}
 		if err != nil {
 			v.lg.ErrorContext(r.Context(), "page messages", "channel", ch.ID, "error", err)
 			http.Error(w, "load messages", http.StatusInternalServerError)
 			return
 		}
-		v.writeMessagePage(w, r, msgs, hasMore, nil)
+		v.writeMessagePage(w, r, msgs, hasMore, hasNewer, nil, pageReq.raw)
 		return
 	}
 	seq, err := v.src.AllMessages(r.Context(), ch.ID)
@@ -289,13 +380,21 @@ func (v *Viewer) apiMessages(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "load messages", http.StatusInternalServerError)
 		return
 	}
-	msgs, hasMore, _, err := collectPage(r.Context(), seq, bound, inclusive, pageSize, "")
+	var msgs []slack.Message
+	var hasMore, hasNewer bool
+	if pageReq.newer {
+		msgs, hasNewer, _, err = collectPageAfter(r.Context(), seq, pageReq.bound, pageSize, "")
+	} else {
+		var sawNewer bool
+		msgs, hasMore, sawNewer, _, err = collectPage(r.Context(), seq, pageReq.bound, pageReq.inclusive, pageSize, "")
+		hasNewer = pageReq.anchored && sawNewer
+	}
 	if err != nil {
 		v.lg.ErrorContext(r.Context(), "read messages", "channel", ch.ID, "error", err)
 		http.Error(w, "read messages", http.StatusInternalServerError)
 		return
 	}
-	v.writeMessagePage(w, r, msgs, hasMore, nil)
+	v.writeMessagePage(w, r, msgs, hasMore, hasNewer, nil, pageReq.raw)
 }
 
 func (v *Viewer) apiThread(w http.ResponseWriter, r *http.Request) {
@@ -308,7 +407,7 @@ func (v *Viewer) apiThread(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid thread timestamp", http.StatusBadRequest)
 		return
 	}
-	bound, inclusive, err := pageBound(r)
+	pageReq, err := pageBound(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -323,22 +422,37 @@ func (v *Viewer) apiThread(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "load thread", http.StatusInternalServerError)
 		return
 	}
-	msgs, hasMore, root, err := collectPage(r.Context(), seq, bound, inclusive, pageSize, ts)
+	var msgs []slack.Message
+	var root *slack.Message
+	var hasMore, hasNewer bool
+	if pageReq.newer {
+		msgs, hasNewer, root, err = collectPageAfter(r.Context(), seq, pageReq.bound, pageSize, ts)
+	} else {
+		var sawNewer bool
+		msgs, hasMore, sawNewer, root, err = collectPage(r.Context(), seq, pageReq.bound, pageReq.inclusive, pageSize, ts)
+		hasNewer = pageReq.anchored && sawNewer
+	}
 	if err != nil {
 		v.lg.ErrorContext(r.Context(), "read thread", "channel", ch.ID, "thread", ts, "error", err)
 		http.Error(w, "read thread", http.StatusInternalServerError)
 		return
 	}
-	v.writeMessagePage(w, r, msgs, hasMore, root)
+	v.writeMessagePage(w, r, msgs, hasMore, hasNewer, root, pageReq.raw)
 }
 
-func (v *Viewer) writeMessagePage(w http.ResponseWriter, r *http.Request, msgs []slack.Message, hasMore bool, root *slack.Message) {
-	page := apiMessagePage{Messages: make([]apiMessageData, 0, len(msgs)), HasMore: hasMore}
+func (v *Viewer) writeMessagePage(w http.ResponseWriter, r *http.Request, msgs []slack.Message, hasMore, hasNewer bool, root *slack.Message, cursor string) {
+	page := apiMessagePage{Messages: make([]apiMessageData, 0, len(msgs)), HasMore: hasMore, HasNewer: hasNewer}
 	for _, msg := range msgs {
 		page.Messages = append(page.Messages, v.messageData(r.Context(), msg))
 	}
 	if hasMore && len(msgs) > 0 {
 		page.NextBefore = msgs[0].Timestamp
+	}
+	if hasNewer {
+		page.NextAfter = cursor
+		if len(msgs) > 0 {
+			page.NextAfter = msgs[len(msgs)-1].Timestamp
+		}
 	}
 	if root != nil {
 		data := v.messageData(r.Context(), *root)

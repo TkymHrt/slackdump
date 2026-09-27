@@ -322,6 +322,29 @@
         margin-bottom: .5rem;
     }
 
+    .file-items.multi {
+        display: flex;
+        gap: .75rem;
+        overflow-x: auto;
+        overscroll-behavior-inline: contain;
+        padding-bottom: .5rem;
+        scroll-snap-type: x proximity;
+    }
+
+    .file-items.multi > * {
+        flex: 0 0 auto;
+        max-width: min(15rem, 75%);
+        scroll-snap-align: start;
+    }
+
+    .file-items.multi .file-image,
+    .file-items.multi .file-video,
+    .file-items.multi .file-audio {
+        max-width: 100%;
+        max-height: 14rem;
+        object-fit: contain;
+    }
+
     .file-hidden {
         background-color: var(--message-hover);
         border: 1px solid var(--border-color);

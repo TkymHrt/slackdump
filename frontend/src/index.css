@@ -206,6 +206,27 @@
 .message-content .slack-files > * {
   margin-bottom: 0.3rem;
 }
+.message-content .file-items.multi {
+  display: flex;
+  gap: 0.75rem;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  padding-bottom: 0.5rem;
+  scroll-snap-type: x proximity;
+}
+.message-content .file-items.multi > * {
+  flex: 0 0 auto;
+  max-width: min(15rem, 75%);
+  scroll-snap-align: start;
+}
+.message-content .file-items.multi .file-image,
+.message-content .file-items.multi .file-video,
+.message-content .file-items.multi .file-audio {
+  display: block;
+  max-width: 100%;
+  max-height: 14rem;
+  object-fit: contain;
+}
 .message-content .file-link {
   display: inline-flex;
   align-items: center;

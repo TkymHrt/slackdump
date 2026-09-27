@@ -288,12 +288,22 @@ func (s *Source) AllMessages(ctx context.Context, channelID string) (iter.Seq2[s
 // optional method lets the live viewer read one page without decoding the
 // entire SQLite archive. It is intentionally not part of source.Sourcer.
 func (s *Source) PageMessages(ctx context.Context, channelID string, bound int64, inclusive bool, limit int) ([]slack.Message, bool, error) {
-	if limit < 1 || limit > 200 {
-		return nil, false, fmt.Errorf("invalid page size %d", limit)
-	}
 	op := "<"
 	if inclusive {
 		op = "<="
+	}
+	return s.pageMessages(ctx, channelID, bound, op, "DESC", true, limit)
+}
+
+// PageMessagesAfter returns the earliest channel timeline messages newer than
+// bound. This is the forward half of the live viewer's bidirectional paging.
+func (s *Source) PageMessagesAfter(ctx context.Context, channelID string, bound int64, limit int) ([]slack.Message, bool, error) {
+	return s.pageMessages(ctx, channelID, bound, ">", "ASC", false, limit)
+}
+
+func (s *Source) pageMessages(ctx context.Context, channelID string, bound int64, op, order string, reverse bool, limit int) ([]slack.Message, bool, error) {
+	if limit < 1 || limit > 200 {
+		return nil, false, fmt.Errorf("invalid page size %d", limit)
 	}
 	// Keep this timeline predicate aligned with repository.channelTimelineCondition.
 	// A newer eligible chunk wins when resume created overlapping messages.
@@ -307,7 +317,7 @@ func (s *Source) PageMessages(ctx context.Context, channelID string, bound int64
 			AND (NC.TYPE_ID = 0 AND (NC.THREAD_ONLY = FALSE OR NC.THREAD_ONLY IS NULL)
 				OR NC.TYPE_ID = 1 AND N.PARENT_ID = N.ID)
 		)
-		ORDER BY M.ID DESC LIMIT ?`
+		ORDER BY M.ID ` + order + ` LIMIT ?`
 	rows, err := s.conn.QueryxContext(ctx, s.conn.Rebind(stmt), channelID, bound, limit+1)
 	if err != nil {
 		return nil, false, fmt.Errorf("page messages query: %w", err)
@@ -332,7 +342,9 @@ func (s *Source) PageMessages(ctx context.Context, channelID string, bound int64
 	if hasMore {
 		result = result[:limit]
 	}
-	slices.Reverse(result)
+	if reverse {
+		slices.Reverse(result)
+	}
 	return result, hasMore, nil
 }
 

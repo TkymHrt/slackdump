@@ -117,6 +117,17 @@ func TestSlack_Render(t *testing.T) {
 			t.Fatal("image preview needs a separate download control")
 		}
 	})
+	t.Run("multiple images share a horizontal gallery", func(t *testing.T) {
+		sm := NewSlack(template.Must(template.New("base").Parse("")), WithRoutes(NewRoutes(ModeLive)))
+		msg := &slack.Message{Msg: slack.Msg{Files: []slack.File{
+			{ID: "F1", Name: "one.png", Mimetype: "image/png"},
+			{ID: "F2", Name: "two.png", Mimetype: "image/png"},
+		}}}
+		got := string(sm.Render(t.Context(), msg))
+		if !strings.Contains(got, `class="file-items multi"`) || strings.Count(got, `class="file-preview-container"`) != 2 {
+			t.Fatal("multiple image previews should share one gallery")
+		}
+	})
 }
 
 func TestSlack_Render_UsesRouteHelperForFiles(t *testing.T) {
