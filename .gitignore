@@ -25,6 +25,8 @@ __debug_bin
 
 # temporary files and the rest of the crap
 *.json
+!frontend/*.json
+!frontend/package-lock.json
 *.yml
 *.yaml
 *.toml
@@ -61,6 +63,8 @@ slackdump_2*
 *.pdf
 *.ps
 *.html
+!frontend/index.html
+!internal/viewer/web/index.html
 \#*\#
 __debug_bin*
 debug.test*

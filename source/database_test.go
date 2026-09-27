@@ -102,7 +102,7 @@ type aliasWriter interface {
 }
 
 func TestOpenDatabaseRW_writable(t *testing.T) {
-	dbpath := filepath.Join(fixturesDir, "source_database.db")
+	dbpath := copyDatabaseFixture(t, filepath.Join(fixturesDir, "source_database.db"))
 	got, err := OpenDatabaseRW(t.Context(), dbpath)
 	if err != nil {
 		t.Fatalf("OpenDatabaseRW() error = %v", err)
@@ -125,7 +125,7 @@ func TestOpenDatabaseRW_fallback(t *testing.T) {
 		return nil, errors.New("simulated rw open failure")
 	}
 
-	dbpath := filepath.Join(fixturesDir, "source_database.db")
+	dbpath := copyDatabaseFixture(t, filepath.Join(fixturesDir, "source_database.db"))
 	got, err := OpenDatabaseRW(t.Context(), dbpath)
 	if err != nil {
 		t.Fatalf("OpenDatabaseRW() fallback error = %v", err)

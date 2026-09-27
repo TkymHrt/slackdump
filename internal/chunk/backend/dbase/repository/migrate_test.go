@@ -154,12 +154,9 @@ func TestMigrate(t *testing.T) {
 		}
 		defer db.Close()
 
-		if err := Migrate(ctx, db, true); err != nil {
-			t.Fatalf("Migrate() err = %v; want nil", err)
-		}
-
-		if err := goose.DownContext(ctx, db, "migrations"); err != nil {
-			t.Fatalf("first goose.DownContext() err = %v; want nil", err)
+		const fileSizeVersion = int64(20260308000000)
+		if err := goose.UpToContext(ctx, db, "migrations", fileSizeVersion); err != nil {
+			t.Fatalf("goose.UpToContext() err = %v; want nil", err)
 		}
 
 		if err := goose.DownContext(ctx, db, "migrations"); err != nil {
