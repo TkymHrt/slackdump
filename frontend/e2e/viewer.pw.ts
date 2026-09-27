@@ -112,9 +112,7 @@ test.beforeEach(async ({ page }) => {
   );
 });
 
-test("loads older history, keeps the scroll position, and opens a search hit", async ({
-  page,
-}, testInfo) => {
+test("loads older history, opens a profile, and opens a search hit", async ({ page }, testInfo) => {
   const cursors: string[] = [];
   page.on("request", (request) => {
     const url = new URL(request.url());
@@ -131,18 +129,10 @@ test("loads older history, keeps the scroll position, and opens a search hit", a
   });
   await expect.poll(() => cursors.length).toBeGreaterThan(0);
   await expect.poll(() => scroller.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-  const firstVisible = async () =>
-    Number(
-      (await page.locator(".message-row:visible").first().textContent())?.match(
-        /message (\d+)/,
-      )?.[1],
-    );
-  const savedMessage = await firstVisible();
   await page.getByRole("button", { name: "View Ada's profile" }).first().click();
   await expect(page.getByRole("heading", { name: "Ada" })).toBeVisible();
   await page.getByRole("button", { name: "Back" }).click();
   await expect(page.getByRole("heading", { name: "#general" })).toBeVisible();
-  await expect.poll(async () => Math.abs((await firstVisible()) - savedMessage)).toBeLessThan(3);
 
   await page.getByRole("searchbox", { name: "Search messages" }).fill("reply body");
   await page.getByRole("button", { name: /reply body/ }).click();
@@ -155,6 +145,9 @@ test("opens an older message link and shows its target", async ({ page }) => {
   await page.goto(`/archives/C1#${ts(45)}`);
   await expect(page.getByText("message 45")).toBeVisible();
   await expect(page.getByRole("button", { name: "Jump to latest" })).toHaveCount(0);
+  await page.getByRole("link", { name: "general" }).click();
+  await expect(page).toHaveURL(/\/archives\/C1$/);
+  await expect(page.getByText("message 205")).toBeVisible();
 });
 
 test("filters conversations from the mobile sidebar", async ({ page }) => {
@@ -267,12 +260,8 @@ test("clicking an inline image does not download; download is explicit", async (
   expect((await download).suggestedFilename()).toBe("sample.png");
 });
 
-test("restored channel position can scroll forward without a latest button", async ({ page }) => {
-  await page.addInitScript(() => {
-    if (!sessionStorage.getItem("viewer:anchor:C1"))
-      sessionStorage.setItem("viewer:anchor:C1", "1710000000.000045");
-  });
-  await page.goto("/archives/C1");
+test("an older message link can scroll forward without a latest button", async ({ page }) => {
+  await page.goto(`/archives/C1#${ts(45)}`);
   await expect(page.getByText("message 45")).toBeVisible();
   await expect(page.getByRole("button", { name: "Jump to latest" })).toHaveCount(0);
   const newer = page.waitForResponse(
@@ -298,21 +287,9 @@ test("restored channel position can scroll forward without a latest button", asy
     element.dispatchEvent(new Event("scroll"));
   });
   await expect(page.getByText("message 205")).toBeVisible();
-  await page.mouse.wheel(0, 100);
-  await expect
-    .poll(async () =>
-      Number(
-        (await page.evaluate(() => sessionStorage.getItem("viewer:anchor:C1")))?.split(".")[1] || 0,
-      ),
-    )
-    .toBeGreaterThanOrEqual(190);
-  const saved = await page.evaluate(() => sessionStorage.getItem("viewer:anchor:C1"));
-  expect(saved).toMatch(/^1710000000\.\d{6}$/);
-  await page.reload();
-  await expect(page.locator(`article[id="${saved}"]`)).toBeVisible();
 });
 
-test("a stale saved position can still scroll into available history", async ({ page }) => {
+test("a message link before archive history can still scroll forward", async ({ page }) => {
   await page.goto("/archives/C1#1000000000.000001");
   const scroller = page.getByLabel("Channel messages");
   await scroller.hover();

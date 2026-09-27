@@ -12,8 +12,6 @@ type Props = {
   threadTs?: string;
   at?: string;
   navigate: (path: string) => void;
-  getInitialScrollTop?: () => number | undefined;
-  onScrollTop?: (top: number) => void;
   hasTabs?: boolean;
 };
 
@@ -108,15 +106,7 @@ function MessageRow({
   );
 }
 
-export default function MessageList({
-  channelId,
-  threadTs,
-  at,
-  navigate,
-  getInitialScrollTop,
-  onScrollTop,
-  hasTabs,
-}: Props) {
+export default function MessageList({ channelId, threadTs, at, navigate, hasTabs }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const initialized = useRef(false);
   const pendingPrepend = useRef<{ total: number; top: number; rootEnd?: number } | null>(null);
@@ -192,16 +182,6 @@ export default function MessageList({
       return;
     }
     if (initialized.current || (messages.length === 0 && !root && !hasPreviousPage)) return;
-    const initialScrollTop = getInitialScrollTop?.();
-    if (initialScrollTop !== undefined) {
-      requestAnimationFrame(() => {
-        node.scrollTop = initialScrollTop;
-        lastScrollTop.current = node.scrollTop;
-        initialized.current = true;
-        node.dispatchEvent(new Event("scroll"));
-      });
-      return;
-    }
     const target = at ? messages.findIndex((message) => message.ts === at) : -1;
     const finish = () => {
       lastScrollTop.current = node.scrollTop;
@@ -240,17 +220,7 @@ export default function MessageList({
       );
       finish();
     });
-  }, [
-    query.data,
-    messages,
-    at,
-    loaderCount,
-    messageOffset,
-    root,
-    hasPreviousPage,
-    virtualizer,
-    getInitialScrollTop,
-  ]);
+  }, [query.data, messages, at, loaderCount, messageOffset, root, hasPreviousPage, virtualizer]);
 
   useEffect(() => {
     const node = scrollRef.current;
@@ -324,51 +294,6 @@ export default function MessageList({
     loaderCount,
     virtualizer,
   ]);
-
-  useEffect(() => {
-    if (threadTs) return;
-    const node = scrollRef.current;
-    if (!node) return;
-    let frame = 0;
-    const saveAnchor = () => {
-      if (!initialized.current) return;
-      const viewport = node.getBoundingClientRect();
-      const visible = Array.from(node.querySelectorAll<HTMLElement>("article[id]")).find((row) => {
-        const rect = row.getBoundingClientRect();
-        return rect.bottom > viewport.top + 1 && rect.top < viewport.bottom - 1;
-      });
-      if (visible) sessionStorage.setItem(`viewer:anchor:${channelId}`, visible.id);
-    };
-    const scheduleSave = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        frame = requestAnimationFrame(saveAnchor);
-      });
-    };
-    const onScroll = () => onScrollTop?.(node.scrollTop);
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key))
-        scheduleSave();
-    };
-    const onPointerMove = (event: PointerEvent) => {
-      if (event.buttons) scheduleSave();
-    };
-    node.addEventListener("scroll", onScroll, { passive: true });
-    node.addEventListener("wheel", scheduleSave, { passive: true });
-    node.addEventListener("touchmove", scheduleSave, { passive: true });
-    node.addEventListener("pointerdown", scheduleSave);
-    node.addEventListener("pointermove", onPointerMove);
-    node.addEventListener("keydown", onKeyDown);
-    return () => {
-      cancelAnimationFrame(frame);
-      node.removeEventListener("scroll", onScroll);
-      node.removeEventListener("wheel", scheduleSave);
-      node.removeEventListener("touchmove", scheduleSave);
-      node.removeEventListener("pointerdown", scheduleSave);
-      node.removeEventListener("pointermove", onPointerMove);
-      node.removeEventListener("keydown", onKeyDown);
-    };
-  }, [channelId, threadTs, messages.length, onScrollTop]);
 
   if (query.isPending) {
     return (

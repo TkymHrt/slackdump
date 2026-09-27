@@ -26,7 +26,6 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 function currentLocation() {
   return {
     path: window.location.pathname,
-    search: window.location.search,
     hash: window.location.hash,
   };
 }
@@ -41,24 +40,6 @@ function decodePart(raw: string) {
   } catch {
     return "";
   }
-}
-
-function initialAnchors() {
-  const anchors = new Map<string, string | undefined>();
-  const parts = window.location.pathname.split("/").filter(Boolean);
-  if (parts[0] === "archives" && parts[1]) {
-    const id = decodePart(parts[1]);
-    const hash = validTimestamp(decodePart(window.location.hash.slice(1)));
-    anchors.set(
-      id,
-      window.location.search.includes("latest=1")
-        ? undefined
-        : parts[2]
-          ? validTimestamp(sessionStorage.getItem(`viewer:anchor:${id}`) || "")
-          : hash || validTimestamp(sessionStorage.getItem(`viewer:anchor:${id}`) || ""),
-    );
-  }
-  return anchors;
 }
 
 function useNavigation() {
@@ -490,8 +471,6 @@ function Profile({ userId, navigate }: { userId: string; navigate: (path: string
 
 function App() {
   const { location, navigate: push } = useNavigation();
-  const [windowAnchors, setWindowAnchors] = useState(initialAnchors);
-  const scrollTops = useRef(new Map<string, number>());
   const [mobileOpen, setMobileOpen] = useState(false);
   const [dark, setDark] = useState(
     () =>
@@ -504,25 +483,6 @@ function App() {
   }, [dark]);
   const navigate = useCallback(
     (path: string) => {
-      const url = new URL(path, window.location.href);
-      const parts = url.pathname.split("/").filter(Boolean);
-      if (parts[0] === "archives" && parts[1]) {
-        const id = decodePart(parts[1]);
-        const hash = validTimestamp(decodePart(url.hash.slice(1)));
-        if (url.searchParams.get("latest") === "1" || (hash && !parts[2]))
-          scrollTops.current.delete(id);
-        setWindowAnchors((previous) => {
-          const next = new Map(previous);
-          if (url.searchParams.get("latest") === "1") {
-            next.set(id, undefined);
-          } else if (hash && !parts[2]) {
-            next.set(id, hash);
-          } else if (!next.has(id)) {
-            next.set(id, validTimestamp(sessionStorage.getItem(`viewer:anchor:${id}`) || ""));
-          }
-          return next;
-        });
-      }
       push(path);
       setMobileOpen(false);
     },
@@ -540,11 +500,7 @@ function App() {
   const threadTs =
     channelId && parts[2] && !canvasActive ? validTimestamp(decodePart(parts[2])) : undefined;
   const hash = validTimestamp(decodePart(location.hash.replace(/^#/, "")));
-  const at = channelId
-    ? windowAnchors.has(channelId)
-      ? windowAnchors.get(channelId)
-      : validTimestamp(sessionStorage.getItem(`viewer:anchor:${channelId}`) || "")
-    : undefined;
+  const at = channelId && !threadTs && !canvasActive ? hash : undefined;
   const channel = useQuery({
     queryKey: ["channel", channelId],
     queryFn: ({ signal }) => api.channel(channelId!, signal),
@@ -682,8 +638,6 @@ function App() {
                         channelId={channelId}
                         at={at}
                         navigate={navigate}
-                        getInitialScrollTop={() => scrollTops.current.get(channelId)}
-                        onScrollTop={(top) => scrollTops.current.set(channelId, top)}
                         hasTabs={channel.data.canvasPresent}
                       />
                     </>

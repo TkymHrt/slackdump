@@ -39,7 +39,6 @@ const bootstrap = {
 beforeEach(() => {
   window.history.replaceState(null, "", "/");
   localStorage.clear();
-  sessionStorage.clear();
   Object.defineProperty(window, "matchMedia", {
     configurable: true,
     value: () => ({ matches: false, addListener: vi.fn(), removeListener: vi.fn() }),
@@ -92,16 +91,15 @@ function renderApp() {
   );
 }
 
-test("navigates channels while keeping a stored message anchor", async () => {
-  sessionStorage.setItem("viewer:anchor:C1", "1710000000.000001");
+test("navigates channels without carrying a message position", async () => {
   renderApp();
   fireEvent.click(await screen.findByRole("link", { name: "general" }));
   expect(window.location.pathname).toBe("/archives/C1");
-  expect((await screen.findByTestId("messages")).textContent).toContain("C1::1710000000.000001");
+  expect((await screen.findByTestId("messages")).textContent).toBe("C1::");
   fireEvent.click(screen.getByRole("link", { name: "random" }));
-  expect((await screen.findByTestId("messages")).textContent).toContain("C2::");
+  expect((await screen.findByTestId("messages")).textContent).toBe("C2::");
   fireEvent.click(screen.getByRole("link", { name: "general" }));
-  expect((await screen.findByTestId("messages")).textContent).toContain("C1::1710000000.000001");
+  expect((await screen.findByTestId("messages")).textContent).toBe("C1::");
 });
 
 test("opens a search hit in its thread at the matching reply", async () => {
