@@ -119,7 +119,7 @@ export default function MessageList({
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const initialized = useRef(false);
-  const pendingPrepend = useRef<{ total: number; top: number } | null>(null);
+  const pendingPrepend = useRef<{ total: number; top: number; rootEnd?: number } | null>(null);
   const query = useInfiniteQuery({
     queryKey: ["messages", channelId, threadTs || "", at || "latest"],
     initialPageParam: "",
@@ -136,12 +136,18 @@ export default function MessageList({
   );
   const root = query.data?.pages[0]?.root;
   const loaderCount = hasNextPage ? 1 : 0;
+  const rootCount = threadTs && root ? 1 : 0;
+  const messageOffset = loaderCount + rootCount;
   const virtualizer = useVirtualizer({
-    count: messages.length + loaderCount,
+    count: messages.length + messageOffset,
     getScrollElement: () => scrollRef.current,
-    estimateSize: (index) => (loaderCount && index === 0 ? 46 : 104),
-    getItemKey: (index) =>
-      loaderCount && index === 0 ? "loader" : messages[index - loaderCount]?.ts || index,
+    estimateSize: (index) =>
+      loaderCount && index === 0 ? 46 : rootCount && index === loaderCount ? 180 : 104,
+    getItemKey: (index) => {
+      if (loaderCount && index === 0) return "loader";
+      if (rootCount && index === loaderCount) return `thread-root-${root?.ts}`;
+      return messages[index - messageOffset]?.ts || index;
+    },
     overscan: 8,
   });
 
@@ -150,11 +156,14 @@ export default function MessageList({
     if (!node || !query.data) return;
     if (pendingPrepend.current) {
       const previous = pendingPrepend.current;
-      node.scrollTop = previous.top + virtualizer.getTotalSize() - previous.total;
+      node.scrollTop =
+        previous.rootEnd !== undefined && previous.top < previous.rootEnd
+          ? previous.top
+          : previous.top + virtualizer.getTotalSize() - previous.total;
       pendingPrepend.current = null;
       return;
     }
-    if (initialized.current || messages.length === 0) return;
+    if (initialized.current || (messages.length === 0 && !root)) return;
     const initialScrollTop = getInitialScrollTop?.();
     if (initialScrollTop !== undefined) {
       requestAnimationFrame(() => {
@@ -167,15 +176,28 @@ export default function MessageList({
     const target = at ? messages.findIndex((message) => message.ts === at) : -1;
     requestAnimationFrame(() => {
       virtualizer.scrollToIndex(
-        target >= 0 ? target + loaderCount : messages.length - 1 + loaderCount,
+        target >= 0
+          ? target + messageOffset
+          : messages.length > 0
+            ? messages.length - 1 + messageOffset
+            : loaderCount,
         {
-          align: target >= 0 ? "center" : "end",
+          align: target >= 0 ? "center" : messages.length > 0 ? "end" : "start",
         },
       );
       initialized.current = true;
       node.dispatchEvent(new Event("scroll"));
     });
-  }, [query.data, messages, at, loaderCount, virtualizer, getInitialScrollTop]);
+  }, [
+    query.data,
+    messages,
+    at,
+    loaderCount,
+    messageOffset,
+    root,
+    virtualizer,
+    getInitialScrollTop,
+  ]);
 
   useEffect(() => {
     const node = scrollRef.current;
@@ -183,13 +205,24 @@ export default function MessageList({
     const loadOlder = () => {
       if (!initialized.current) return;
       if (node.scrollTop > 350 && node.scrollHeight > node.clientHeight) return;
-      pendingPrepend.current = { total: virtualizer.getTotalSize(), top: node.scrollTop };
+      const rootEnd = rootCount
+        ? virtualizer.getVirtualItems().find((item) => item.index === loaderCount)?.end
+        : undefined;
+      pendingPrepend.current = { total: virtualizer.getTotalSize(), top: node.scrollTop, rootEnd };
       void fetchNextPage();
     };
     node.addEventListener("scroll", loadOlder, { passive: true });
     loadOlder();
     return () => node.removeEventListener("scroll", loadOlder);
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage, messages.length, virtualizer]);
+  }, [
+    hasNextPage,
+    isFetchingNextPage,
+    fetchNextPage,
+    messages.length,
+    rootCount,
+    loaderCount,
+    virtualizer,
+  ]);
 
   useEffect(() => {
     if (threadTs) return;
@@ -241,28 +274,21 @@ export default function MessageList({
       tabIndex={hasTabs && !threadTs ? 0 : undefined}
       className="flex min-h-0 flex-1 flex-col"
     >
-      {threadTs && root && (
-        <div className="shrink-0 border-b bg-muted/30">
-          <div className="px-8 pt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Original message
-          </div>
-          <MessageRow message={root} channelId={channelId} navigate={navigate} compact />
-        </div>
-      )}
       <div
         ref={scrollRef}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
-        aria-label={threadTs ? "Thread replies" : "Channel messages"}
+        aria-label={threadTs ? "Thread messages" : "Channel messages"}
       >
-        {messages.length === 0 && (
+        {messages.length === 0 && !root && (
           <div className="flex h-full items-center justify-center p-8 text-center text-sm text-muted-foreground">
             No messages in this conversation.
           </div>
         )}
         <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
           {virtualizer.getVirtualItems().map((item) => {
-            const message = messages[item.index - loaderCount];
-            const previous = messages[item.index - loaderCount - 1];
+            const isRoot = !!rootCount && item.index === loaderCount;
+            const message = messages[item.index - messageOffset];
+            const previous = messages[item.index - messageOffset - 1];
             return (
               <div
                 key={item.key}
@@ -271,7 +297,14 @@ export default function MessageList({
                 className="absolute left-0 top-0 w-full"
                 style={{ transform: `translateY(${item.start}px)` }}
               >
-                {message ? (
+                {isRoot && root ? (
+                  <div data-thread-root className="border-b bg-muted/30">
+                    <div className="px-8 pt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Original message
+                    </div>
+                    <MessageRow message={root} channelId={channelId} navigate={navigate} compact />
+                  </div>
+                ) : message ? (
                   <>
                     {(!previous || previous.time.slice(0, 10) !== message.time.slice(0, 10)) && (
                       <div className="relative my-4 border-t text-center">

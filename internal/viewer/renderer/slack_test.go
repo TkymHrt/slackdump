@@ -106,6 +106,17 @@ func TestSlack_Render(t *testing.T) {
 			assert.Equal(t, tt.wantV, gotV)
 		})
 	}
+	t.Run("image preview has a separate download control", func(t *testing.T) {
+		sm := NewSlack(template.Must(template.New("base").Parse("")), WithRoutes(NewRoutes(ModeLive)))
+		msg := &slack.Message{Msg: slack.Msg{Files: []slack.File{{ID: "F123", Name: "sample.png", Mimetype: "image/png"}}}}
+		got := string(sm.Render(t.Context(), msg))
+		if strings.Contains(got, `<a href="/slackdump/file/F123/sample.png" target="_blank">`) {
+			t.Fatal("clicking an image preview would navigate to a download response")
+		}
+		if !strings.Contains(got, `class="file-download file-link"`) || !strings.Contains(got, `download="sample.png"`) {
+			t.Fatal("image preview needs a separate download control")
+		}
+	})
 }
 
 func TestSlack_Render_UsesRouteHelperForFiles(t *testing.T) {

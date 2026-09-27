@@ -184,3 +184,59 @@ test("switches canvas tabs with the keyboard and keeps its sandbox", async ({ pa
   await expect(page.getByRole("tab", { name: "Canvas" })).toHaveAttribute("aria-selected", "true");
   await expect(page.locator("iframe")).toHaveAttribute("sandbox", "allow-same-origin");
 });
+
+test("the thread root scrolls together with replies", async ({ page }) => {
+  const longRoot = {
+    ...messages[99],
+    html: Array.from({ length: 40 }, (_, i) => `<p>Original line ${i}</p>`).join(""),
+  };
+  await page.route(`**/api/channels/C1/threads/${ts(100)}*`, (route) =>
+    route.fulfill({ json: { root: longRoot, messages: [reply], hasMore: false } }),
+  );
+  await page.goto(`/archives/C1/${ts(100)}`);
+  const scroller = page.getByLabel("Thread messages");
+  const original = scroller.getByText("Original message");
+  await scroller.evaluate((element) => {
+    element.scrollTop = 0;
+    element.dispatchEvent(new Event("scroll"));
+  });
+  await expect(original).toBeVisible();
+  await scroller.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+    element.dispatchEvent(new Event("scroll"));
+  });
+  await expect(original).not.toBeInViewport();
+  await expect(scroller.getByText("reply body")).toBeInViewport();
+});
+
+test("clicking an inline image does not download; download is explicit", async ({ page }) => {
+  const path = "/slackdump/file/F1/sample.png";
+  const imageMessage = {
+    ...messages[0],
+    html: `<section class="slack-files"><div class="file-preview-container"><img class="file-image" src="${path}" alt="sample.png" width="200" height="120"><div><a class="file-download file-link" href="${path}" download="sample.png" aria-label="Download sample.png">Download image</a></div></div></section>`,
+  };
+  await page.route("**/api/channels/C1/messages*", (route) =>
+    route.fulfill({ json: { messages: [imageMessage], hasMore: false } }),
+  );
+  await page.route(`**${path}`, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/octet-stream",
+      body: Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nAAAAABJRU5ErkJggg==",
+        "base64",
+      ),
+    }),
+  );
+  const downloads: string[] = [];
+  page.on("download", (download) => downloads.push(download.suggestedFilename()));
+  await page.goto("/archives/C1");
+  const image = page.locator(".file-image");
+  await expect(image).toBeVisible();
+  await image.click();
+  expect(downloads).toHaveLength(0);
+  await expect(page).toHaveURL(/\/archives\/C1$/);
+  const download = page.waitForEvent("download");
+  await page.getByRole("link", { name: "Download sample.png" }).click();
+  expect((await download).suggestedFilename()).toBe("sample.png");
+});

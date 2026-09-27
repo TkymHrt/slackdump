@@ -11,9 +11,8 @@
     {{ else }}
         {{ if (eq (mimetype $f.Mimetype) "image") }}
         <div class="file-preview-container">
-            <a href="{{ $path }}" target="_blank">
-                <img class="file-image" src="{{ $path }}" alt="{{ $f.Name }}" />
-            </a>
+            <img class="file-image" src="{{ $path }}" alt="{{ $f.Name }}" />
+            <div><a class="file-download file-link" href="{{ $path }}" download="{{ $f.Name }}" aria-label="Download {{ $f.Name }}">Download image</a></div>
         </div>
         {{ else if (eq (mimetype $f.Mimetype) "video") }}
         <div class="file-preview-container">
