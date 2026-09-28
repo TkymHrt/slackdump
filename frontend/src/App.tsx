@@ -422,7 +422,7 @@ function ChannelHeader({
             onClick={() => navigate(`${base}/canvas`)}
             className={`min-h-11 border-b-2 px-1 py-2 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-40 ${canvasActive ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
           >
-            キャンバス
+            Canvas
           </button>
         </div>
       )}
@@ -605,20 +605,20 @@ function App() {
                         id="canvas-panel"
                         role="tabpanel"
                         aria-labelledby={channel.data.canvasPresent ? "tab-canvas" : undefined}
-                        aria-label={channel.data.canvasPresent ? undefined : "キャンバス"}
+                        aria-label={channel.data.canvasPresent ? undefined : "Canvas"}
                         tabIndex={0}
                         className="min-h-0 flex-1"
                       >
                         {channel.data.canvasAvailable ? (
                           <iframe
-                            title={`${channel.data.name}のキャンバス`}
+                            title={`${channel.data.name}のCanvas`}
                             src={`/archives/${encodeURIComponent(channelId)}/canvas/content`}
                             sandbox="allow-same-origin"
                             className="size-full border-0"
                           />
                         ) : (
                           <p className="p-8 text-sm text-muted-foreground">
-                            キャンバスのファイルが保存されていないため表示できません。
+                            Canvasを表示するためのファイルが保存されていません。
                           </p>
                         )}
                       </div>

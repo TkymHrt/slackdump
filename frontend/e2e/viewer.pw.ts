@@ -32,6 +32,10 @@ const messages = Array.from({ length: 205 }, (_, i) => ({
   isThreadStart: i === 99,
 }));
 
+function imagePreview(path: string, name: string, width: number, height: number, alt = name) {
+  return `<div class="file-preview-container"><img class="file-image" src="${path}" alt="${alt}" width="${width}" height="${height}"><a class="file-download" href="${path}" download="${name}" aria-label="${name}をダウンロード" title="画像をダウンロード"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m-4-4 4 4 4-4M4 17v3h16v-3"></path></svg></a></div>`;
+}
+
 test.beforeEach(async ({ page }) => {
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
@@ -200,10 +204,7 @@ test("switches canvas tabs with the keyboard and keeps its sandbox", async ({ pa
   await messagesTab.focus();
   await messagesTab.press("ArrowRight");
   await expect(page).toHaveURL(/\/archives\/C1\/canvas$/);
-  await expect(page.getByRole("tab", { name: "キャンバス" })).toHaveAttribute(
-    "aria-selected",
-    "true",
-  );
+  await expect(page.getByRole("tab", { name: "Canvas" })).toHaveAttribute("aria-selected", "true");
   await expect(page.locator("iframe")).toHaveAttribute("sandbox", "allow-same-origin");
 });
 
@@ -235,7 +236,7 @@ test("clicking an inline image does not download; download is explicit", async (
   const path = "/slackdump/file/F1/sample.png";
   const imageMessage = {
     ...messages[0],
-    html: `<section class="slack-files"><div class="file-preview-container"><img class="file-image" src="${path}" alt="sample.png" width="200" height="120"><div><a class="file-download file-link" href="${path}" download="sample.png" aria-label="sample.pngをダウンロード">画像をダウンロード</a></div></div></section>`,
+    html: `<section class="slack-files">${imagePreview(path, "sample.png", 200, 120)}</section>`,
   };
   await page.route("**/api/channels/C1/messages*", (route) =>
     route.fulfill({ json: { messages: [imageMessage], hasMore: false } }),
@@ -255,11 +256,23 @@ test("clicking an inline image does not download; download is explicit", async (
   await page.goto("/archives/C1");
   const image = page.locator(".file-image");
   await expect(image).toBeVisible();
+  const downloadControl = page.getByRole("link", { name: "sample.pngをダウンロード" });
+  await expect(downloadControl.locator("svg")).toBeVisible();
+  const imageBox = await image.boundingBox();
+  const controlBox = await downloadControl.boundingBox();
+  expect(imageBox).not.toBeNull();
+  expect(controlBox).not.toBeNull();
+  expect(controlBox!.width).toBeGreaterThanOrEqual(44);
+  expect(controlBox!.height).toBeGreaterThanOrEqual(44);
+  expect(controlBox!.x).toBeGreaterThanOrEqual(imageBox!.x);
+  expect(controlBox!.y).toBeGreaterThanOrEqual(imageBox!.y);
+  expect(controlBox!.x + controlBox!.width).toBeLessThanOrEqual(imageBox!.x + imageBox!.width);
+  expect(controlBox!.y + controlBox!.height).toBeLessThanOrEqual(imageBox!.y + imageBox!.height);
   await image.click();
   expect(downloads).toHaveLength(0);
   await expect(page).toHaveURL(/\/archives\/C1$/);
   const download = page.waitForEvent("download");
-  await page.getByRole("link", { name: "sample.pngをダウンロード" }).click();
+  await downloadControl.click();
   expect((await download).suggestedFilename()).toBe("sample.png");
 });
 
@@ -357,7 +370,7 @@ test("multiple images in one message form a horizontal gallery", async ({ page }
   await page.setViewportSize({ width: 600, height: 700 });
   const previews = Array.from({ length: 3 }, (_, index) => {
     const path = `/slackdump/file/F${index + 1}/picture.png`;
-    return `<div class="file-preview-container"><img class="file-image" src="${path}" alt="picture ${index + 1}" width="240" height="140"><div><a class="file-download file-link" href="${path}" download="picture.png">画像をダウンロード</a></div></div>`;
+    return imagePreview(path, "picture.png", 240, 140, `picture ${index + 1}`);
   }).join("");
   await page.route("**/api/channels/C1/messages*", (route) =>
     route.fulfill({

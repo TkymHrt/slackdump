@@ -13,7 +13,9 @@
         {{ if (eq (mimetype $f.Mimetype) "image") }}
         <div class="file-preview-container">
             <img class="file-image" src="{{ $path }}" alt="{{ $f.Name }}" />
-            <div><a class="file-download file-link" href="{{ $path }}" download="{{ $f.Name }}" aria-label="{{ $f.Name }}をダウンロード">画像をダウンロード</a></div>
+            <a class="file-download" href="{{ $path }}" download="{{ $f.Name }}" aria-label="{{ $f.Name }}をダウンロード" title="画像をダウンロード">
+                <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m-4-4 4 4 4-4M4 17v3h16v-3" /></svg>
+            </a>
         </div>
         {{ else if (eq (mimetype $f.Mimetype) "video") }}
         <div class="file-preview-container">

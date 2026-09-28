@@ -368,7 +368,44 @@
     .file-preview-container {
         position: relative;
         display: inline-block;
+        max-width: 100%;
         margin-bottom: .75rem;
+        vertical-align: top;
+    }
+
+    .file-preview-container .file-image {
+        display: block;
+        margin-bottom: 0;
+    }
+
+    .file-download {
+        position: absolute;
+        top: .5rem;
+        right: .5rem;
+        display: grid;
+        width: 2.75rem;
+        height: 2.75rem;
+        place-items: center;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        background: var(--bg-color);
+        color: var(--text-color);
+        text-decoration: none;
+        box-shadow: 0 1px 3px var(--shadow-color);
+    }
+
+    .file-download:hover {
+        background: var(--message-hover);
+    }
+
+    .file-download:focus-visible {
+        outline: 2px solid var(--link-color);
+        outline-offset: 2px;
+    }
+
+    .file-download svg {
+        width: 1.125rem;
+        height: 1.125rem;
     }
 
     /* File link styling */

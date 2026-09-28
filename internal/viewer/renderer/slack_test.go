@@ -113,10 +113,10 @@ func TestSlack_Render(t *testing.T) {
 		if strings.Contains(got, `<a href="/slackdump/file/F123/sample.png" target="_blank">`) {
 			t.Fatal("clicking an image preview would navigate to a download response")
 		}
-		if !strings.Contains(got, `class="file-download file-link"`) || !strings.Contains(got, `download="sample.png"`) {
+		if !strings.Contains(got, `class="file-download"`) || !strings.Contains(got, `download="sample.png"`) || !strings.Contains(got, `<svg`) {
 			t.Fatal("image preview needs a separate download control")
 		}
-		if !strings.Contains(got, "添付ファイル 1件") || !strings.Contains(got, "画像をダウンロード") {
+		if !strings.Contains(got, "添付ファイル 1件") || !strings.Contains(got, `aria-label="sample.pngをダウンロード"`) || !strings.Contains(got, `title="画像をダウンロード"`) {
 			t.Fatal("file controls should use Japanese labels")
 		}
 	})
