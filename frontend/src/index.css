@@ -196,6 +196,10 @@
   max-height: 22rem;
   border-radius: 0.5rem;
 }
+.message-content .file-image {
+  border: 1px solid var(--border);
+  background: var(--muted);
+}
 .message-content .slack-attachment {
   max-width: 38rem;
   border-left-color: var(--primary);

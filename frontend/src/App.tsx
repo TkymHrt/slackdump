@@ -82,7 +82,7 @@ function ChannelLink({
         navigate(href);
       }}
       aria-current={selected ? "page" : undefined}
-      className={`flex min-w-0 items-center gap-2.5 rounded-md px-3 py-1.5 text-[0.87rem] transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground ${selected ? "bg-sidebar-accent font-semibold text-sidebar-accent-foreground" : "text-sidebar-foreground/75"}`}
+      className={`flex min-h-11 min-w-0 items-center gap-2.5 rounded-md px-3 py-1.5 text-[0.87rem] transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-2 focus-visible:outline-ring lg:min-h-9 ${selected ? "bg-sidebar-accent font-semibold text-sidebar-accent-foreground" : "text-sidebar-foreground/75"}`}
     >
       <Icon className="size-4 shrink-0 opacity-65" aria-hidden="true" />
       <span className="truncate">
@@ -132,7 +132,7 @@ function Sidebar({
             placeholder="チャンネル・DMを絞り込む"
             value={filter}
             onChange={(event) => setFilter(event.target.value)}
-            className="h-9 pl-8 text-sm"
+            className="h-11 pl-8 text-sm"
           />
         </div>
       </div>
@@ -219,7 +219,7 @@ function GlobalSearch({
     staleTime: 60_000,
   });
   return (
-    <div className="relative w-full max-w-xl">
+    <div className="relative mx-auto w-full max-w-2xl">
       <div className="relative">
         <Search
           className="pointer-events-none absolute left-3 top-2.5 size-4 text-muted-foreground"
@@ -232,7 +232,7 @@ function GlobalSearch({
           aria-label="メッセージを検索"
           value={input}
           onChange={(event) => setInput(event.target.value)}
-          className="h-9 border-transparent bg-muted/60 pl-9 pr-3 focus-visible:border-ring"
+          className="h-11 border-transparent bg-muted/60 pl-9 pr-3 focus-visible:border-ring"
         />
       </div>
       {input.trim().length >= 2 && (
@@ -336,6 +336,7 @@ function ChannelHeader({
                 variant="ghost"
                 size="icon-xs"
                 aria-label="別名を編集"
+                className="min-h-11 min-w-11 sm:min-h-7 sm:min-w-7"
                 onClick={() => setEditing(!editing)}
               >
                 <Pencil className="size-3.5" />
@@ -411,7 +412,7 @@ function ChannelHeader({
             aria-controls="conversation-panel"
             tabIndex={canvasActive ? -1 : 0}
             onClick={() => navigate(base)}
-            className={`border-b-2 pb-2 text-sm font-medium ${!canvasActive ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+            className={`min-h-11 border-b-2 px-1 py-2 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${!canvasActive ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
           >
             メッセージ
           </button>
@@ -424,7 +425,7 @@ function ChannelHeader({
             tabIndex={canvasActive ? 0 : -1}
             disabled={!channel.canvasAvailable}
             onClick={() => navigate(`${base}/canvas`)}
-            className={`border-b-2 pb-2 text-sm font-medium disabled:opacity-40 ${canvasActive ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+            className={`min-h-11 border-b-2 px-1 py-2 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-40 ${canvasActive ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
           >
             キャンバス
           </button>
@@ -444,6 +445,7 @@ function Profile({ userId, navigate }: { userId: string; navigate: (path: string
       <Button
         variant="ghost"
         size="sm"
+        className="min-h-11 sm:min-h-8"
         onClick={() => (window.history.length > 1 ? window.history.back() : navigate("/"))}
       >
         <ArrowLeft className="size-4" />
@@ -536,21 +538,17 @@ function App() {
           <Button
             variant="ghost"
             size="icon"
-            className="lg:hidden"
+            className="min-h-11 min-w-11 lg:hidden"
             aria-label="会話一覧を開く"
             onClick={() => setMobileOpen(true)}
           >
             <Menu className="size-5" />
           </Button>
-          <div className="hidden min-w-0 items-center gap-2 text-sm font-semibold sm:flex">
-            <span className="truncate">{bootstrap.data?.name || "Slackdump"}</span>
-            <span className="text-muted-foreground">/</span>
-          </div>
           <GlobalSearch navigate={navigate} channelId={channelId} />
           <Button
             variant="ghost"
             size="icon"
-            className="ml-auto"
+            className="ml-auto min-h-11 min-w-11"
             onClick={() => setDark(!dark)}
             aria-label={dark ? "ライトテーマに切り替える" : "ダークテーマに切り替える"}
           >
@@ -664,6 +662,7 @@ function App() {
                     <Button
                       variant="ghost"
                       size="icon-sm"
+                      className="min-h-11 min-w-11 sm:min-h-7 sm:min-w-7"
                       aria-label="スレッドを閉じる"
                       onClick={() => navigate(`/archives/${encodeURIComponent(channelId)}`)}
                     >
@@ -692,7 +691,7 @@ function App() {
             </p>
             <Button
               variant="outline"
-              className="mt-5 lg:hidden"
+              className="mt-5 min-h-11 lg:hidden"
               onClick={() => setMobileOpen(true)}
             >
               会話一覧を見る

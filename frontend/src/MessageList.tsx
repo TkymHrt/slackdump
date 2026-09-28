@@ -68,7 +68,7 @@ function MessageRow({
     >
       <button
         type="button"
-        className="relative mt-0.5 size-10 shrink-0 overflow-hidden rounded-lg bg-muted outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="relative mt-0.5 size-11 shrink-0 overflow-hidden rounded-lg bg-muted outline-none focus-visible:ring-2 focus-visible:ring-ring sm:size-10"
         onClick={() => message.userId && navigate(`/team/${encodeURIComponent(message.userId)}`)}
         aria-label={`${message.author}のプロフィールを開く`}
         disabled={!message.userId}
@@ -90,10 +90,10 @@ function MessageRow({
         />
       </button>
       <div className="min-w-0 flex-1">
-        <div className="mb-1 flex flex-wrap items-baseline gap-x-2">
+        <div className="mb-1 flex flex-wrap items-center gap-x-2">
           <button
             type="button"
-            className="font-semibold text-foreground hover:underline disabled:no-underline"
+            className="inline-flex min-h-11 items-center font-semibold text-foreground hover:underline disabled:no-underline sm:min-h-7"
             onClick={() =>
               message.userId && navigate(`/team/${encodeURIComponent(message.userId)}`)
             }
@@ -102,7 +102,7 @@ function MessageRow({
             {message.author}
           </button>
           <a
-            className="text-xs text-primary/80 underline underline-offset-2 hover:text-primary"
+            className="inline-flex min-h-11 items-center text-xs text-primary underline underline-offset-2 hover:text-primary sm:min-h-7"
             href={messageURL}
             aria-label="投稿へのリンクを開く"
             title="投稿へのリンクを開く"
@@ -112,7 +112,7 @@ function MessageRow({
           <Button
             variant="ghost"
             size="xs"
-            className="h-6 gap-1 px-1 text-xs text-muted-foreground"
+            className="min-h-11 gap-1 px-2 text-xs text-muted-foreground sm:min-h-7 sm:px-1"
             aria-label="投稿リンクをコピー"
             title="投稿リンクをコピー"
             onClick={() => void copyLink()}
@@ -122,7 +122,14 @@ function MessageRow({
             ) : (
               <Copy className="size-3.5" />
             )}
-            <span aria-hidden="true">
+            <span
+              aria-hidden="true"
+              className={
+                copyStatus === "idle"
+                  ? "sm:hidden sm:group-hover:inline sm:group-focus-within:inline"
+                  : ""
+              }
+            >
               {copyStatus === "copied" ? "コピーしました" : "リンクをコピー"}
             </span>
           </Button>
@@ -138,14 +145,14 @@ function MessageRow({
           </span>
         </div>
         <div
-          className="message-content break-words text-[0.925rem] leading-relaxed"
+          className="message-content break-words text-base leading-relaxed sm:text-[0.95rem]"
           dangerouslySetInnerHTML={{ __html: safeHTML }}
         />
         {!compact && message.isThreadStart && (
           <button
             type="button"
             onClick={() => navigate(threadPath)}
-            className="mt-2 inline-flex items-center gap-2 rounded-md px-2 py-1 text-xs font-medium text-primary hover:bg-primary/10 focus-visible:outline-2 focus-visible:outline-ring"
+            className="mt-2 inline-flex min-h-11 items-center gap-2 rounded-md px-2 py-1 text-xs font-medium text-primary hover:bg-primary/10 focus-visible:outline-2 focus-visible:outline-ring sm:min-h-8"
           >
             <MessageCircle className="size-4" aria-hidden="true" />
             返信 {message.replyCount || 0}件

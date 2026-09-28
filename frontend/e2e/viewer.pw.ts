@@ -410,3 +410,24 @@ test("main viewer controls use Japanese labels", async ({ page }) => {
   await expect(page.getByRole("searchbox", { name: "メッセージを検索" })).toBeVisible();
   await expect(page.getByRole("region", { name: "チャンネル" })).toBeVisible();
 });
+
+test("mobile reading controls have comfortable touch targets", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/archives/C1");
+  const row = page.locator(".message-row").last();
+  await row.waitFor();
+  const controls = [
+    page.getByRole("button", { name: "会話一覧を開く" }),
+    page.getByRole("searchbox", { name: "メッセージを検索" }),
+    row.getByRole("link", { name: "投稿へのリンクを開く" }),
+    row.getByRole("button", { name: "投稿リンクをコピー" }),
+  ];
+  for (const control of controls) {
+    const box = await control.boundingBox();
+    expect(box?.height).toBeGreaterThanOrEqual(44);
+  }
+  const fontSize = await row
+    .locator(".message-content")
+    .evaluate((element) => parseFloat(getComputedStyle(element).fontSize));
+  expect(fontSize).toBeGreaterThanOrEqual(16);
+});
