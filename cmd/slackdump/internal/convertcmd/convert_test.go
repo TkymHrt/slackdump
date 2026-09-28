@@ -18,6 +18,7 @@ package convertcmd
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/rusq/slackdump/v4/cmd/slackdump/internal/cfg"
@@ -47,8 +48,12 @@ func TestRunConvert_HTML(t *testing.T) {
 			t.Fatalf("runConvert() error = %v", err)
 		}
 
-		if _, err := os.Stat(filepath.Join(output, "index.html")); err != nil {
+		index, err := os.ReadFile(filepath.Join(output, "index.html"))
+		if err != nil {
 			t.Fatalf("expected index.html to be written: %v", err)
+		}
+		if !strings.Contains(string(index), `class="container`) || strings.Contains(string(index), `/assets/index-`) {
+			t.Fatal("static HTML conversion should render the self-contained Go template")
 		}
 	})
 

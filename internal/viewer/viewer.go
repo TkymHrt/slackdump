@@ -149,18 +149,37 @@ func New(ctx context.Context, addr string, r source.Sourcer, opts ...Option) (*V
 	mux := http.NewServeMux()
 
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(StaticFS()))))
-	mux.HandleFunc("GET /", v.indexHandler)
+	if options.mode == renderer.ModeLive {
+		mux.Handle("GET /assets/", http.StripPrefix("/assets/", http.FileServer(http.FS(webAssets()))))
+		mux.HandleFunc("GET /", v.appHandler)
+		mux.HandleFunc("GET /api/bootstrap", v.apiBootstrap)
+		mux.HandleFunc("GET /api/channels/{id}", v.apiChannel)
+		mux.HandleFunc("GET /api/channels/{id}/messages", v.apiMessages)
+		mux.HandleFunc("GET /api/channels/{id}/threads/{ts}", v.apiThread)
+		mux.HandleFunc("GET /api/users/{id}", v.apiUser)
+		mux.HandleFunc("GET /api/search", v.apiSearch)
+		mux.HandleFunc("PUT /api/channels/{id}/alias", v.apiAlias)
+	} else {
+		mux.HandleFunc("GET /", v.indexHandler)
+	}
 	// https: //ora600.slack.com/archives/CHY5HUESG
-	mux.HandleFunc("GET /archives/{id}", v.newFileHandler(v.channelHandler))
-	mux.HandleFunc("GET /archives/{id}/canvas", v.newFileHandler(v.canvasHandler))
+	if options.mode == renderer.ModeLive {
+		mux.HandleFunc("GET /archives/{id}", v.appChannelHandler)
+		mux.HandleFunc("GET /archives/{id}/canvas", v.appChannelHandler)
+		mux.HandleFunc("GET /team/{user_id}", v.appUserHandler)
+		mux.HandleFunc("GET /archives/{id}/{ts}", v.appPostHandler)
+	} else {
+		mux.HandleFunc("GET /archives/{id}", v.newFileHandler(v.channelHandler))
+		mux.HandleFunc("GET /archives/{id}/canvas", v.newFileHandler(v.canvasHandler))
+		mux.HandleFunc("GET /team/{user_id}", v.userHandler)
+		mux.HandleFunc("GET /archives/{id}/{ts}", v.newFileHandler(v.postRedirectHandler))
+	}
 	mux.HandleFunc("GET /archives/{id}/canvas/content", v.newFileHandler(v.canvasContentHandler))
 	// https: //ora600.slack.com/archives/DHMAB25DY/p1710063528879959
 	// https://ora600.slack.com/archives/CHY5HUESG/p1738580940349469?thread_ts=1737716342.919259&cid=CHY5HUESG
 	mux.HandleFunc("GET /archives/{id}/alias/", v.aliasHandler)
 	mux.HandleFunc("PUT /archives/{id}/alias/", v.aliasPutHandler)
 	mux.HandleFunc("DELETE /archives/{id}/alias/", v.aliasDeleteHandler)
-	mux.HandleFunc("GET /archives/{id}/{ts}", v.newFileHandler(v.postRedirectHandler))
-	mux.HandleFunc("GET /team/{user_id}", v.userHandler)
 	mux.Handle("GET /slackdump/file/{id}/{filename}", cacheMwareFunc(3*hour)(http.HandlerFunc(v.fileHandler)))
 	v.srv = &http.Server{
 		Addr:    addr,

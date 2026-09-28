@@ -106,6 +106,31 @@ func TestSlack_Render(t *testing.T) {
 			assert.Equal(t, tt.wantV, gotV)
 		})
 	}
+	t.Run("image preview has a separate download control", func(t *testing.T) {
+		sm := NewSlack(template.Must(template.New("base").Parse("")), WithRoutes(NewRoutes(ModeLive)))
+		msg := &slack.Message{Msg: slack.Msg{Files: []slack.File{{ID: "F123", Name: "sample.png", Mimetype: "image/png"}}}}
+		got := string(sm.Render(t.Context(), msg))
+		if strings.Contains(got, `<a href="/slackdump/file/F123/sample.png" target="_blank">`) {
+			t.Fatal("clicking an image preview would navigate to a download response")
+		}
+		if !strings.Contains(got, `class="file-download"`) || !strings.Contains(got, `download="sample.png"`) || !strings.Contains(got, `<svg`) {
+			t.Fatal("image preview needs a separate download control")
+		}
+		if !strings.Contains(got, "添付ファイル 1件") || !strings.Contains(got, `aria-label="sample.pngをダウンロード"`) || !strings.Contains(got, `title="画像をダウンロード"`) {
+			t.Fatal("file controls should use Japanese labels")
+		}
+	})
+	t.Run("multiple images share a horizontal gallery", func(t *testing.T) {
+		sm := NewSlack(template.Must(template.New("base").Parse("")), WithRoutes(NewRoutes(ModeLive)))
+		msg := &slack.Message{Msg: slack.Msg{Files: []slack.File{
+			{ID: "F1", Name: "one.png", Mimetype: "image/png"},
+			{ID: "F2", Name: "two.png", Mimetype: "image/png"},
+		}}}
+		got := string(sm.Render(t.Context(), msg))
+		if !strings.Contains(got, `class="file-items multi"`) || strings.Count(got, `class="file-preview-container"`) != 2 {
+			t.Fatal("multiple image previews should share one gallery")
+		}
+	})
 }
 
 func TestSlack_Render_UsesRouteHelperForFiles(t *testing.T) {

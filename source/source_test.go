@@ -18,6 +18,7 @@ package source
 import (
 	"context"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -27,6 +28,31 @@ import (
 )
 
 var fixturesDir = filepath.Join("..", "internal", "fixtures", "assets")
+
+func copyDatabaseFixture(t *testing.T, path string) string {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := path
+	if info.IsDir() {
+		input = filepath.Join(path, DefaultDBFile)
+	}
+	data, err := os.ReadFile(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	output := filepath.Join(dir, filepath.Base(input))
+	if err := os.WriteFile(output, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if info.IsDir() {
+		return dir
+	}
+	return output
+}
 
 func TestLoad(t *testing.T) {
 	type args struct {
@@ -96,7 +122,11 @@ func TestLoad(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := Load(tt.args.ctx, tt.args.src)
+			path := tt.args.src
+			if tt.name == "database directory" || tt.name == "database file" {
+				path = copyDatabaseFixture(t, path)
+			}
+			got, err := Load(tt.args.ctx, path)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Load() error = %v, wantErr %v (file: %q)", err, tt.wantErr, tt.args.src)
 				return
@@ -105,6 +135,9 @@ func TestLoad(t *testing.T) {
 			gotT := reflect.TypeOf(got)
 			if wantT != gotT {
 				t.Errorf("Load() = %v, want %v", gotT, wantT)
+			}
+			if got != nil {
+				defer got.Close()
 			}
 		})
 	}

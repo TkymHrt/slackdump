@@ -1,18 +1,20 @@
 {{if . }}
 <section class="slack-files">
-    <p>{{len .}} files:</p>
+    <p>添付ファイル {{len .}}件</p>
+    <div class="file-items{{if gt (len .) 1}} multi{{end}}">
     {{ range $i, $f := . }}
     {{ if $f.ID }}
     {{ $path := fileurl $f.ID $f.Name }}
     {{ if (eq $f.Mode "hidden_by_limit") }}
         <div class="file-hidden">
-            <p>File {{$f.ID}} hidden by limit</p>
+            <p>ファイル {{$f.ID}} はSlackの制限により表示できません。</p>
         </div>
     {{ else }}
         {{ if (eq (mimetype $f.Mimetype) "image") }}
         <div class="file-preview-container">
-            <a href="{{ $path }}" target="_blank">
-                <img class="file-image" src="{{ $path }}" alt="{{ $f.Name }}" />
+            <img class="file-image" src="{{ $path }}" alt="{{ $f.Name }}" />
+            <a class="file-download" href="{{ $path }}" download="{{ $f.Name }}" aria-label="{{ $f.Name }}をダウンロード" title="画像をダウンロード">
+                <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m-4-4 4 4 4-4M4 17v3h16v-3" /></svg>
             </a>
         </div>
         {{ else if (eq (mimetype $f.Mimetype) "video") }}
@@ -35,5 +37,6 @@
     {{ end }}{{/* hidden_by_limit */}}
     {{ end }}{{/* f.ID */}}
     {{ end }}{{/* range */}}
+    </div>
 </section>
 {{end}}

@@ -603,6 +603,106 @@ func TestSource_AllMessages(t *testing.T) {
 	}
 }
 
+func TestSource_PageMessages(t *testing.T) {
+	const channelID = "C01"
+	makeMessage := func(ts, text string) slack.Message {
+		return slack.Message{Msg: slack.Msg{Timestamp: ts, Text: text}}
+	}
+	first := makeMessage("1700000000.000001", "first")
+	parent := makeMessage("1700000000.000002", "parent")
+	parent.ThreadTimestamp = parent.Timestamp
+	parent.LatestReply = "1700000000.000006"
+	parent.ReplyCount = 1
+	third := makeMessage("1700000000.000003", "third")
+	fourth := makeMessage("1700000000.000004", "fourth")
+	reply := makeMessage("1700000000.000006", "reply")
+	reply.ThreadTimestamp = parent.Timestamp
+	updated := third
+	updated.Text = "updated third"
+
+	db := testDB(t)
+	prepTestChunk(
+		&chunk.Chunk{Type: chunk.CMessages, ChannelID: channelID, Messages: []slack.Message{first, parent, third, fourth}},
+		&chunk.Chunk{Type: chunk.CMessages, ChannelID: channelID, Messages: []slack.Message{updated}},
+		&chunk.Chunk{Type: chunk.CThreadMessages, ChannelID: channelID, Parent: &parent, Messages: []slack.Message{parent, reply}},
+	)(t, db)
+	s := &Source{conn: db}
+
+	t.Run("latest page and deduplication", func(t *testing.T) {
+		got, more, err := s.PageMessages(t.Context(), channelID, int64(^uint64(0)>>1), false, 2)
+		require.NoError(t, err)
+		require.True(t, more)
+		require.Len(t, got, 2)
+		assert.Equal(t, []string{third.Timestamp, fourth.Timestamp}, []string{got[0].Timestamp, got[1].Timestamp})
+		assert.Equal(t, "updated third", got[0].Text)
+	})
+	t.Run("older page excludes replies", func(t *testing.T) {
+		got, more, err := s.PageMessages(t.Context(), channelID, 1700000000000003, false, 2)
+		require.NoError(t, err)
+		require.False(t, more)
+		require.Len(t, got, 2)
+		assert.Equal(t, []string{first.Timestamp, parent.Timestamp}, []string{got[0].Timestamp, got[1].Timestamp})
+	})
+	t.Run("inclusive anchor", func(t *testing.T) {
+		got, _, err := s.PageMessages(t.Context(), channelID, 1700000000000003, true, 1)
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		assert.Equal(t, third.Timestamp, got[0].Timestamp)
+	})
+	t.Run("newer page retains timeline and deduplicates", func(t *testing.T) {
+		got, newer, err := s.PageMessagesAfter(t.Context(), channelID, 1700000000000001, 2)
+		require.NoError(t, err)
+		require.True(t, newer)
+		require.Len(t, got, 2)
+		assert.Equal(t, []string{parent.Timestamp, third.Timestamp}, []string{got[0].Timestamp, got[1].Timestamp})
+		assert.Equal(t, "updated third", got[1].Text)
+		got, newer, err = s.PageMessagesAfter(t.Context(), channelID, 1700000000000003, 2)
+		require.NoError(t, err)
+		require.False(t, newer)
+		require.Len(t, got, 1)
+		assert.Equal(t, fourth.Timestamp, got[0].Timestamp)
+	})
+}
+
+func TestSource_SearchMessages(t *testing.T) {
+	m := func(ts, text string) slack.Message { return slack.Message{Msg: slack.Msg{Timestamp: ts, Text: text}} }
+	old := m("1700000000.000001", "needle in old copy")
+	updated := m(old.Timestamp, "removed in latest copy")
+	match := m("1700000000.000002", "Needle in channel")
+	parent := m("1700000000.000003", "parent")
+	parent.ThreadTimestamp = parent.Timestamp
+	parent.LatestReply = "1700000000.000004"
+	parent.ReplyCount = 1
+	reply := m("1700000000.000004", "needle in reply")
+	reply.ThreadTimestamp = parent.Timestamp
+	other := m("1700000000.000005", "needle in another channel")
+	db := testDB(t)
+	prepTestChunk(
+		&chunk.Chunk{Type: chunk.CMessages, ChannelID: "C01", Messages: []slack.Message{old, match, parent}},
+		&chunk.Chunk{Type: chunk.CMessages, ChannelID: "C01", Messages: []slack.Message{updated}},
+		&chunk.Chunk{Type: chunk.CThreadMessages, ChannelID: "C01", Parent: &parent, Messages: []slack.Message{parent, reply}},
+		&chunk.Chunk{Type: chunk.CMessages, ChannelID: "C02", Messages: []slack.Message{other}},
+	)(t, db)
+	s := &Source{conn: db}
+	for _, tc := range []struct {
+		name, channel string
+		want          []string
+	}{
+		{"all channels", "", []string{other.Timestamp, reply.Timestamp, match.Timestamp}},
+		{"one channel", "C01", []string{reply.Timestamp, match.Timestamp}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got []string
+			err := s.SearchMessages(t.Context(), "needle", tc.channel, 50, func(_ string, msg slack.Message) error {
+				got = append(got, msg.Timestamp)
+				return nil
+			})
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 func TestSource_AllThreadMessages(t *testing.T) {
 	threadMsg := []slack.Message{
 		{Msg: slack.Msg{Timestamp: "1234567890.000001", ThreadTimestamp: "1234567890.000001"}},

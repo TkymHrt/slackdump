@@ -18,6 +18,7 @@ package dbase
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"iter"
@@ -25,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/trace"
+	"slices"
 	"time"
 
 	"github.com/rusq/slackdump/v4/internal/chunk/backend/dbase/repository"
@@ -280,6 +282,116 @@ func (s *Source) AllMessages(ctx context.Context, channelID string) (iter.Seq2[s
 		return nil, err
 	}
 	return valueIter(it), nil
+}
+
+// PageMessages returns the latest channel timeline messages below bound. The
+// optional method lets the live viewer read one page without decoding the
+// entire SQLite archive. It is intentionally not part of source.Sourcer.
+func (s *Source) PageMessages(ctx context.Context, channelID string, bound int64, inclusive bool, limit int) ([]slack.Message, bool, error) {
+	op := "<"
+	if inclusive {
+		op = "<="
+	}
+	return s.pageMessages(ctx, channelID, bound, op, "DESC", true, limit)
+}
+
+// PageMessagesAfter returns the earliest channel timeline messages newer than
+// bound. This is the forward half of the live viewer's bidirectional paging.
+func (s *Source) PageMessagesAfter(ctx context.Context, channelID string, bound int64, limit int) ([]slack.Message, bool, error) {
+	return s.pageMessages(ctx, channelID, bound, ">", "ASC", false, limit)
+}
+
+func (s *Source) pageMessages(ctx context.Context, channelID string, bound int64, op, order string, reverse bool, limit int) ([]slack.Message, bool, error) {
+	if limit < 1 || limit > 200 {
+		return nil, false, fmt.Errorf("invalid page size %d", limit)
+	}
+	// Keep this timeline predicate aligned with repository.channelTimelineCondition.
+	// A newer eligible chunk wins when resume created overlapping messages.
+	stmt := `SELECT M.DATA FROM MESSAGE M JOIN CHUNK CH ON CH.ID = M.CHUNK_ID
+		WHERE M.CHANNEL_ID = ? AND M.ID ` + op + ` ?
+		AND (CH.TYPE_ID = 0 AND (CH.THREAD_ONLY = FALSE OR CH.THREAD_ONLY IS NULL)
+			OR CH.TYPE_ID = 1 AND M.PARENT_ID = M.ID)
+		AND NOT EXISTS (
+			SELECT 1 FROM MESSAGE N JOIN CHUNK NC ON NC.ID = N.CHUNK_ID
+			WHERE N.ID = M.ID AND N.CHANNEL_ID = M.CHANNEL_ID AND N.CHUNK_ID > M.CHUNK_ID
+			AND (NC.TYPE_ID = 0 AND (NC.THREAD_ONLY = FALSE OR NC.THREAD_ONLY IS NULL)
+				OR NC.TYPE_ID = 1 AND N.PARENT_ID = N.ID)
+		)
+		ORDER BY M.ID ` + order + ` LIMIT ?`
+	rows, err := s.conn.QueryxContext(ctx, s.conn.Rebind(stmt), channelID, bound, limit+1)
+	if err != nil {
+		return nil, false, fmt.Errorf("page messages query: %w", err)
+	}
+	defer rows.Close()
+	result := make([]slack.Message, 0, limit+1)
+	for rows.Next() {
+		var data []byte
+		if err := rows.Scan(&data); err != nil {
+			return nil, false, fmt.Errorf("page messages scan: %w", err)
+		}
+		var msg slack.Message
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return nil, false, fmt.Errorf("page messages decode: %w", err)
+		}
+		result = append(result, msg)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, fmt.Errorf("page messages rows: %w", err)
+	}
+	hasMore := len(result) > limit
+	if hasMore {
+		result = result[:limit]
+	}
+	if reverse {
+		slices.Reverse(result)
+	}
+	return result, hasMore, nil
+}
+
+// SearchMessages searches the latest archived copy of each message. Matching
+// and ordering stay in SQLite so the viewer only decodes the returned hits.
+// It is an optional capability and is not added to source.Sourcer.
+func (s *Source) SearchMessages(ctx context.Context, needle, channelID string, limit int, visit func(string, slack.Message) error) error {
+	if limit < 1 || limit > 200 {
+		return fmt.Errorf("invalid search limit %d", limit)
+	}
+	stmt := `SELECT M.CHANNEL_ID, M.DATA FROM MESSAGE M JOIN CHUNK CH ON CH.ID = M.CHUNK_ID
+		WHERE CH.TYPE_ID IN (0, 1) AND INSTR(LOWER(COALESCE(M.TXT, '')), LOWER(?)) > 0
+		AND NOT EXISTS (
+			SELECT 1 FROM MESSAGE N JOIN CHUNK NC ON NC.ID = N.CHUNK_ID
+			WHERE N.ID = M.ID AND N.CHANNEL_ID = M.CHANNEL_ID AND N.CHUNK_ID > M.CHUNK_ID
+			AND NC.TYPE_ID IN (0, 1)
+		)`
+	binds := []any{needle}
+	if channelID != "" {
+		stmt += ` AND M.CHANNEL_ID = ?`
+		binds = append(binds, channelID)
+	}
+	stmt += ` ORDER BY M.ID DESC LIMIT ?`
+	binds = append(binds, limit)
+	rows, err := s.conn.QueryxContext(ctx, s.conn.Rebind(stmt), binds...)
+	if err != nil {
+		return fmt.Errorf("search messages query: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var foundChannel string
+		var data []byte
+		if err := rows.Scan(&foundChannel, &data); err != nil {
+			return fmt.Errorf("search messages scan: %w", err)
+		}
+		var msg slack.Message
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return fmt.Errorf("search messages decode: %w", err)
+		}
+		if err := visit(foundChannel, msg); err != nil {
+			return err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("search messages rows: %w", err)
+	}
+	return nil
 }
 
 func (s *Source) AllThreadMessages(ctx context.Context, channelID, threadID string) (iter.Seq2[slack.Message, error], error) {

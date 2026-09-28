@@ -194,5 +194,7 @@ slackdump view ./slackdump_20240101_000000
 ```
 
 This starts a local web server and opens the archive in your browser. See the
+[viewer guide](../cmd/slackdump/internal/view/assets/view.md) for searching,
+threads, and keyboard shortcuts. See the
 [Troubleshooting](troubleshooting.md#built-in-viewer-slackdump-view) section
 if the viewer returns 404 errors for attachments.

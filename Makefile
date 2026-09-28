@@ -39,6 +39,18 @@ $(foreach s,$(OSES),$(eval $(OUTPUT)-$s.zip: $(EXECUTABLE)))
 all: ## Build the executable (incremental - Go handles changes)
 	GOARCH=$(GOARCH) GOOS=$(GOOS) go build -ldflags=$(LDFLAGS) -o $(EXECUTABLE) $(CMD)
 
+viewer-assets: ## Rebuild the embedded React viewer after frontend changes
+	cd frontend && npm run build
+.PHONY: viewer-assets
+
+viewer-check: ## Check the React viewer
+	cd frontend && npm run format:check && npm run lint && npm test && npm run build
+.PHONY: viewer-check
+
+viewer-e2e: ## Run Chromium viewer interaction tests
+	cd frontend && npm run test:e2e
+.PHONY: viewer-e2e
+
 dist: ## Build distribution archives for all platforms
 	$(MAKE) $(ZIPFILES)
 

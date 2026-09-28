@@ -322,6 +322,29 @@
         margin-bottom: .5rem;
     }
 
+    .file-items.multi {
+        display: flex;
+        gap: .75rem;
+        overflow-x: auto;
+        overscroll-behavior-inline: contain;
+        padding-bottom: .5rem;
+        scroll-snap-type: x proximity;
+    }
+
+    .file-items.multi > * {
+        flex: 0 0 auto;
+        max-width: min(15rem, 75%);
+        scroll-snap-align: start;
+    }
+
+    .file-items.multi .file-image,
+    .file-items.multi .file-video,
+    .file-items.multi .file-audio {
+        max-width: 100%;
+        max-height: 14rem;
+        object-fit: contain;
+    }
+
     .file-hidden {
         background-color: var(--message-hover);
         border: 1px solid var(--border-color);
@@ -345,7 +368,44 @@
     .file-preview-container {
         position: relative;
         display: inline-block;
+        max-width: 100%;
         margin-bottom: .75rem;
+        vertical-align: top;
+    }
+
+    .file-preview-container .file-image {
+        display: block;
+        margin-bottom: 0;
+    }
+
+    .file-download {
+        position: absolute;
+        top: .5rem;
+        right: .5rem;
+        display: grid;
+        width: 2.75rem;
+        height: 2.75rem;
+        place-items: center;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        background: var(--bg-color);
+        color: var(--text-color);
+        text-decoration: none;
+        box-shadow: 0 1px 3px var(--shadow-color);
+    }
+
+    .file-download:hover {
+        background: var(--message-hover);
+    }
+
+    .file-download:focus-visible {
+        outline: 2px solid var(--link-color);
+        outline-offset: 2px;
+    }
+
+    .file-download svg {
+        width: 1.125rem;
+        height: 1.125rem;
     }
 
     /* File link styling */
