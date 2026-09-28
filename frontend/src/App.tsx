@@ -426,6 +426,7 @@ function applyCanvasTheme(frame: HTMLIFrameElement | null) {
   canvas.documentElement.style.colorScheme = document.documentElement.classList.contains("dark")
     ? "dark"
     : "light";
+  canvas.documentElement.style.scrollbarColor = viewer.scrollbarColor;
   canvas.documentElement.style.backgroundColor = background;
   canvas.body.style.backgroundColor = background;
   canvas.body.style.color = foreground;

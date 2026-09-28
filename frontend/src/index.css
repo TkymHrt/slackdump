@@ -49,6 +49,10 @@
 }
 
 :root {
+  color-scheme: light;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+  --scrollbar-thumb: oklch(0.76 0.012 295);
+  --scrollbar-thumb-hover: oklch(0.63 0.014 295);
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -84,6 +88,9 @@
 }
 
 .dark {
+  color-scheme: dark;
+  --scrollbar-thumb: oklch(0.43 0.018 295);
+  --scrollbar-thumb-hover: oklch(0.53 0.021 295);
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
