@@ -12,7 +12,6 @@ export type Channel = {
 export type Bootstrap = {
   name: string;
   type: string;
-  canAlias: boolean;
   channels: Channel[];
 };
 
@@ -54,15 +53,12 @@ export type SearchResult = {
   message: Message;
 };
 
-async function request<T>(path: string, signal?: AbortSignal, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, { ...init, signal }).catch((error: unknown) => {
+async function request<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(path, { signal }).catch((error: unknown) => {
     if (signal?.aborted) throw error;
     throw new Error("ビューワーに接続できません。");
   });
   if (!response.ok) {
-    if (response.status === 400 && path.endsWith("/alias")) {
-      throw new Error("別名は30文字以内で、文字・数字・_・-のみ使えます。");
-    }
     if (response.status === 400) throw new Error("入力内容を確認してください。");
     if (response.status === 404) throw new Error("対象が見つかりません。");
     throw new Error(`操作に失敗しました（HTTP ${response.status}）。`);
@@ -101,10 +97,4 @@ export const api = {
     if (channel) params.set("channel", channel);
     return request<{ results: SearchResult[] }>(`/api/search?${params}`, signal);
   },
-  alias: (id: string, alias: string) =>
-    request<{ alias: string }>(`/api/channels/${encodeURIComponent(id)}/alias`, undefined, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ alias }),
-    }),
 };

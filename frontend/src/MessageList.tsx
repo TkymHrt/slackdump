@@ -38,6 +38,7 @@ function MessageRow({
   const messagePath =
     message.threadTs && message.threadTs !== message.ts ? threadPath : channelPath;
   const messageURL = `${messagePath}#${message.ts}`;
+  const fullTimestamp = `${dateLabel(message.time)}${message.time.slice(11, 19)}`;
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "error">("idle");
   useEffect(() => {
     if (copyStatus === "idle") return;
@@ -101,14 +102,14 @@ function MessageRow({
           >
             {message.author}
           </button>
-          <a
-            className="inline-flex min-h-11 items-center text-xs text-primary underline underline-offset-2 hover:text-primary sm:min-h-7"
-            href={messageURL}
-            aria-label="投稿へのリンクを開く"
-            title="投稿へのリンクを開く"
+          <time
+            className="inline-flex min-h-11 items-center text-xs text-muted-foreground sm:min-h-7"
+            dateTime={message.time.replace(" ", "T")}
+            aria-label={fullTimestamp}
+            title={fullTimestamp}
           >
             {message.time.slice(11, 16)}
-          </a>
+          </time>
           <Button
             variant="ghost"
             size="xs"

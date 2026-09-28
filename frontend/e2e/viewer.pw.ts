@@ -206,6 +206,27 @@ test("switches canvas tabs with the keyboard and keeps its sandbox", async ({ pa
   await expect(page).toHaveURL(/\/archives\/C1\/canvas$/);
   await expect(page.getByRole("tab", { name: "Canvas" })).toHaveAttribute("aria-selected", "true");
   await expect(page.locator("iframe")).toHaveAttribute("sandbox", "allow-same-origin");
+  await expect(page.frameLocator("iframe").getByText("Canvas body")).toBeVisible();
+  const getCanvasColors = () =>
+    page
+      .frameLocator("iframe")
+      .locator("body")
+      .evaluate((body) => {
+        const style = getComputedStyle(body);
+        return { text: style.color, background: style.backgroundColor };
+      });
+  const getThemeColors = () =>
+    page.locator("body").evaluate((body) => {
+      const style = getComputedStyle(body);
+      return { text: style.color, background: style.backgroundColor };
+    });
+  expect(await getCanvasColors()).toEqual(await getThemeColors());
+  await page.getByRole("button", { name: "ダークテーマに切り替える" }).click();
+  await expect(page.locator("html")).toHaveClass(/dark/);
+  expect(await getCanvasColors()).toEqual(await getThemeColors());
+  await page.getByRole("button", { name: "ライトテーマに切り替える" }).click();
+  await expect(page.locator("html")).not.toHaveClass(/dark/);
+  expect(await getCanvasColors()).toEqual(await getThemeColors());
 });
 
 test("the thread root scrolls together with replies", async ({ page }) => {
@@ -398,15 +419,18 @@ test("multiple images in one message form a horizontal gallery", async ({ page }
   expect(await gallery.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
 });
 
-test("a post link can be opened and copied from its message", async ({ page, context }) => {
+test("post time shows its full date and the post link can be copied", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await page.goto("/archives/C1");
   const row = page.locator(`article[id="${ts(205)}"]`);
   await row.waitFor();
-  const link = row.getByRole("link", { name: "投稿へのリンクを開く" });
-  await expect(link).toHaveAttribute("href", `/archives/C1#${ts(205)}`);
-  await link.click();
-  await expect(page).toHaveURL(new RegExp(`#${ts(205)}$`));
+  const time = row.locator("time");
+  await expect(time).toHaveText(messages[204].time.slice(11, 16));
+  await expect(time).toHaveAttribute("title", "2024年3月9日16:03:24");
+  await expect(time).toHaveAttribute("dateTime", "2024-03-09T16:03:24");
+  await time.click();
+  await expect(page).toHaveURL(/\/archives\/C1$/);
+  await expect(row.getByRole("link", { name: "投稿へのリンクを開く" })).toHaveCount(0);
   await row.getByRole("button", { name: "投稿リンクをコピー" }).click();
   await expect
     .poll(() => page.evaluate(() => navigator.clipboard.readText()))
@@ -414,14 +438,33 @@ test("a post link can be opened and copied from its message", async ({ page, con
   await expect(
     row.getByRole("button", { name: "投稿リンクをコピー" }).getByText("コピーしました"),
   ).toBeVisible();
+  await page.goto(await page.evaluate(() => navigator.clipboard.readText()));
+  await expect(page).toHaveURL(new RegExp(`#${ts(205)}$`));
+  await expect(page.locator(`article[id="${ts(205)}"]`)).toBeVisible();
 });
 
 test("main viewer controls use Japanese labels", async ({ page }) => {
+  await page.route("**/api/bootstrap", (route) =>
+    route.fulfill({
+      json: { name: "sample-archive", type: "database", canAlias: true, channels: [channel] },
+    }),
+  );
   await page.goto("/");
   await expect(page.locator("html")).toHaveAttribute("lang", "ja");
   await expect(page.getByRole("heading", { name: "会話を選択してください" })).toBeVisible();
   await expect(page.getByRole("searchbox", { name: "メッセージを検索" })).toBeVisible();
   await expect(page.getByRole("region", { name: "チャンネル" })).toBeVisible();
+  await expect(
+    page
+      .locator("aside")
+      .first()
+      .getByText(/^会話 \d+件$/),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("region", { name: "チャンネル" }).getByText("1", { exact: true }),
+  ).toHaveCount(0);
+  await page.locator('a[href="/archives/C1"]').first().click();
+  await expect(page.getByRole("button", { name: "別名を編集" })).toHaveCount(0);
 });
 
 test("mobile reading controls have comfortable touch targets", async ({ page }) => {
@@ -432,7 +475,6 @@ test("mobile reading controls have comfortable touch targets", async ({ page }) 
   const controls = [
     page.getByRole("button", { name: "会話一覧を開く" }),
     page.getByRole("searchbox", { name: "メッセージを検索" }),
-    row.getByRole("link", { name: "投稿へのリンクを開く" }),
     row.getByRole("button", { name: "投稿リンクをコピー" }),
   ];
   for (const control of controls) {

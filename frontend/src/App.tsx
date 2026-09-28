@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import {
   Archive,
   ArrowLeft,
@@ -7,7 +7,6 @@ import {
   LockKeyhole,
   Menu,
   Moon,
-  Pencil,
   Search,
   Sun,
   UsersRound,
@@ -146,7 +145,6 @@ function Sidebar({
                 <div className="mb-2 flex items-center gap-1 px-3 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
                   <ChevronDown className="size-3.5" />
                   {group.title}
-                  <span className="ml-auto font-normal tracking-normal">{channels.length}</span>
                 </div>
                 <div className="space-y-0.5">
                   {channels.map((channel) => (
@@ -167,9 +165,6 @@ function Sidebar({
             ) && <p className="px-3 text-sm text-muted-foreground">該当する会話はありません。</p>}
         </div>
       </ScrollArea>
-      <div className="border-t border-sidebar-border px-5 py-3 text-xs text-muted-foreground">
-        会話 {data.channels.length}件
-      </div>
     </div>
   );
 }
@@ -294,26 +289,13 @@ function GlobalSearch({
 
 function ChannelHeader({
   channel,
-  canAlias,
   navigate,
   canvasActive,
 }: {
   channel: Channel;
-  canAlias: boolean;
   navigate: (path: string) => void;
   canvasActive: boolean;
 }) {
-  const [editing, setEditing] = useState(false);
-  const [alias, setAlias] = useState(channel.alias || "");
-  const client = useQueryClient();
-  const mutation = useMutation({
-    mutationFn: () => api.alias(channel.id, alias),
-    onSuccess: () => {
-      setEditing(false);
-      void client.invalidateQueries({ queryKey: ["bootstrap"] });
-      void client.invalidateQueries({ queryKey: ["channel", channel.id] });
-    },
-  });
   const base = `/archives/${encodeURIComponent(channel.id)}`;
   return (
     <div className="shrink-0 border-b bg-background">
@@ -326,52 +308,12 @@ function ChannelHeader({
             {channel.archived && (
               <span className="text-xs text-muted-foreground">アーカイブ済み</span>
             )}
-            {canAlias && (
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                aria-label="別名を編集"
-                className="min-h-11 min-w-11 sm:min-h-7 sm:min-w-7"
-                onClick={() => setEditing(!editing)}
-              >
-                <Pencil className="size-3.5" />
-              </Button>
-            )}
           </div>
           {channel.topic && (
             <p className="truncate text-xs text-muted-foreground">{channel.topic}</p>
           )}
         </div>
       </div>
-      {editing && (
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            mutation.mutate();
-          }}
-          className="flex items-center gap-2 border-t bg-muted/30 px-5 py-2 sm:px-8"
-        >
-          <Input
-            aria-label="別名"
-            value={alias}
-            onChange={(event) => setAlias(event.target.value)}
-            maxLength={30}
-            placeholder="別名を入力"
-            className="max-w-64"
-          />
-          <Button type="submit" size="sm" disabled={mutation.isPending}>
-            保存
-          </Button>
-          <Button type="button" size="sm" variant="ghost" onClick={() => setEditing(false)}>
-            キャンセル
-          </Button>
-          {mutation.isError && (
-            <span role="alert" className="text-xs text-destructive">
-              {mutation.error.message}
-            </span>
-          )}
-        </form>
-      )}
       {channel.canvasPresent && (
         <div
           role="tablist"
@@ -473,9 +415,26 @@ function Profile({ userId, navigate }: { userId: string; navigate: (path: string
   );
 }
 
+function applyCanvasTheme(frame: HTMLIFrameElement | null) {
+  const canvas = frame?.contentDocument;
+  if (!canvas?.body) return;
+
+  // Archived Canvas HTML lives in its own document and cannot inherit the viewer's theme class.
+  const viewer = getComputedStyle(document.documentElement);
+  const background = viewer.getPropertyValue("--background").trim();
+  const foreground = viewer.getPropertyValue("--foreground").trim();
+  canvas.documentElement.style.colorScheme = document.documentElement.classList.contains("dark")
+    ? "dark"
+    : "light";
+  canvas.documentElement.style.backgroundColor = background;
+  canvas.body.style.backgroundColor = background;
+  canvas.body.style.color = foreground;
+}
+
 function App() {
   const { location, navigate: push } = useNavigation();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const canvasFrame = useRef<HTMLIFrameElement>(null);
   const [dark, setDark] = useState(
     () =>
       localStorage.getItem("viewer:theme") === "dark" ||
@@ -484,6 +443,7 @@ function App() {
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
     localStorage.setItem("viewer:theme", dark ? "dark" : "light");
+    applyCanvasTheme(canvasFrame.current);
   }, [dark]);
   const navigate = useCallback(
     (path: string) => {
@@ -586,7 +546,6 @@ function App() {
                     <ChannelHeader
                       key={channel.data.id}
                       channel={channel.data}
-                      canAlias={bootstrap.data.canAlias}
                       navigate={navigate}
                       canvasActive={canvasActive}
                     />
@@ -611,10 +570,12 @@ function App() {
                       >
                         {channel.data.canvasAvailable ? (
                           <iframe
+                            ref={canvasFrame}
                             title={`${channel.data.name}のCanvas`}
                             src={`/archives/${encodeURIComponent(channelId)}/canvas/content`}
                             sandbox="allow-same-origin"
                             className="size-full border-0"
+                            onLoad={(event) => applyCanvasTheme(event.currentTarget)}
                           />
                         ) : (
                           <p className="p-8 text-sm text-muted-foreground">
