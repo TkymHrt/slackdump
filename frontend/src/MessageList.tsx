@@ -151,7 +151,7 @@ function MessageRow({
           </span>
         </div>
         <div
-          className="message-content break-words text-base leading-relaxed sm:text-[0.95rem]"
+          className="message-content wrap-break-word text-base leading-relaxed sm:text-[0.95rem]"
           dangerouslySetInnerHTML={{ __html: safeHTML }}
         />
         {!compact && message.isThreadStart && (

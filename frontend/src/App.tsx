@@ -482,11 +482,12 @@ function App() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [searchJump, setSearchJump] = useState({ path: "", sequence: 0 });
   const canvasFrame = useRef<HTMLIFrameElement>(null);
-  const [dark, setDark] = useState(
-    () =>
-      localStorage.getItem("viewer:theme") === "dark" ||
-      (!localStorage.getItem("viewer:theme") && matchMedia("(prefers-color-scheme: dark)").matches),
-  );
+  const [dark, setDark] = useState(() => {
+    const storedTheme = localStorage.getItem("viewer:theme");
+    return (
+      storedTheme === "dark" || (!storedTheme && matchMedia("(prefers-color-scheme: dark)").matches)
+    );
+  });
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
     localStorage.setItem("viewer:theme", dark ? "dark" : "light");

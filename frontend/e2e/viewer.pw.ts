@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { expect, test } from "@playwright/test";
 
 const ts = (n: number) => `1710000000.${String(n).padStart(6, "0")}`;
