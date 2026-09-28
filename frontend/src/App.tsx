@@ -113,18 +113,13 @@ function Sidebar({
   return (
     <div className="flex h-full min-h-0 flex-col bg-sidebar text-sidebar-foreground">
       <div className="border-b border-sidebar-border px-5 py-4">
-        <div className="flex items-center gap-2.5">
-          <div className="flex size-9 items-center justify-center rounded-xl bg-primary text-sm font-bold text-primary-foreground">
-            S
-          </div>
-          <div className="min-w-0">
-            <h1 className="truncate text-base font-bold leading-tight">Slackdump</h1>
-            <p className="truncate text-xs text-muted-foreground">{data.name}</p>
-          </div>
+        <div className="min-w-0">
+          <h1 className="truncate text-base font-bold leading-tight">Slackdump</h1>
+          <p className="truncate text-xs text-muted-foreground">{data.name}</p>
         </div>
         <div className="relative mt-5">
           <Search
-            className="pointer-events-none absolute left-2.5 top-2.5 size-3.5 text-muted-foreground"
+            className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
             aria-hidden="true"
           />
           <Input
@@ -222,7 +217,7 @@ function GlobalSearch({
     <div className="relative mx-auto w-full max-w-2xl">
       <div className="relative">
         <Search
-          className="pointer-events-none absolute left-3 top-2.5 size-4 text-muted-foreground"
+          className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
           aria-hidden="true"
         />
         <Input
