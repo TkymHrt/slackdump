@@ -48,8 +48,14 @@ function useNavigation() {
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
-  const navigate = useCallback((path: string) => {
-    window.history.pushState(null, "", path);
+  const navigate = useCallback((path: string, options?: { replace?: boolean }) => {
+    if (options?.replace) {
+      window.history.replaceState(null, "", path);
+    } else {
+      const current = window.location.pathname + window.location.search + window.location.hash;
+      if (path === current) return;
+      window.history.pushState({ slackdumpNavigation: true }, "", path);
+    }
     setLocation(currentLocation());
   }, []);
   return { location, navigate };
@@ -172,18 +178,30 @@ function Sidebar({
 function GlobalSearch({
   navigate,
   channelId,
+  locationKey,
 }: {
   navigate: (path: string) => void;
   channelId?: string;
+  locationKey: string;
 }) {
   const [input, setInput] = useState("");
   const [term, setTerm] = useState("");
   const [scope, setScope] = useState(false);
+  const [openForLocation, setOpenForLocation] = useState<string | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const showResults = openForLocation === locationKey && input.trim().length >= 2;
   useEffect(() => {
     const id = window.setTimeout(() => setTerm(input.trim()), 250);
     return () => window.clearTimeout(id);
   }, [input]);
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpenForLocation(null);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, []);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (
@@ -196,6 +214,7 @@ function GlobalSearch({
       }
       if (event.key === "Escape") {
         setInput("");
+        setOpenForLocation(null);
         inputRef.current?.blur();
       }
     };
@@ -209,7 +228,7 @@ function GlobalSearch({
     staleTime: 60_000,
   });
   return (
-    <div className="relative mx-auto w-full max-w-2xl">
+    <div ref={rootRef} className="relative mx-auto w-full max-w-2xl">
       <div className="relative">
         <Search
           className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
@@ -220,13 +239,20 @@ function GlobalSearch({
           type="search"
           placeholder="メッセージを検索（/）"
           aria-label="メッセージを検索"
+          aria-expanded={showResults}
+          aria-controls={showResults ? "global-search-results" : undefined}
           value={input}
-          onChange={(event) => setInput(event.target.value)}
+          onChange={(event) => {
+            setInput(event.target.value);
+            setOpenForLocation(locationKey);
+          }}
+          onFocus={() => setOpenForLocation(locationKey)}
           className="h-11 border-transparent bg-muted/60 pl-9 pr-3 focus-visible:border-ring"
         />
       </div>
-      {input.trim().length >= 2 && (
+      {showResults && (
         <div
+          id="global-search-results"
           className="absolute left-0 right-0 top-11 z-30 max-h-[min(70vh,34rem)] overflow-auto rounded-xl border bg-popover p-2 shadow-xl"
           role="region"
           aria-label="検索結果"
@@ -262,6 +288,7 @@ function GlobalSearch({
                 onClick={() => {
                   navigate(path);
                   setInput("");
+                  setOpenForLocation(null);
                 }}
                 className="block w-full rounded-lg px-3 py-2.5 text-left hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
               >
@@ -359,6 +386,7 @@ function ChannelHeader({
             role="tab"
             aria-selected={canvasActive}
             aria-controls="canvas-panel"
+            aria-describedby={!channel.canvasAvailable ? "canvas-unavailable-hint" : undefined}
             tabIndex={canvasActive ? 0 : -1}
             disabled={!channel.canvasAvailable}
             onClick={() => navigate(`${base}/canvas`)}
@@ -368,11 +396,22 @@ function ChannelHeader({
           </button>
         </div>
       )}
+      {channel.canvasPresent && !channel.canvasAvailable && (
+        <p id="canvas-unavailable-hint" className="px-5 pb-2 text-xs text-muted-foreground sm:px-8">
+          Canvasのファイルは保存されていません。
+        </p>
+      )}
     </div>
   );
 }
 
-function Profile({ userId, navigate }: { userId: string; navigate: (path: string) => void }) {
+function Profile({
+  userId,
+  navigate,
+}: {
+  userId: string;
+  navigate: (path: string, options?: { replace?: boolean }) => void;
+}) {
   const user = useQuery({
     queryKey: ["user", userId],
     queryFn: ({ signal }) => api.user(userId, signal),
@@ -383,7 +422,13 @@ function Profile({ userId, navigate }: { userId: string; navigate: (path: string
         variant="ghost"
         size="sm"
         className="min-h-11 sm:min-h-8"
-        onClick={() => (window.history.length > 1 ? window.history.back() : navigate("/"))}
+        onClick={() => {
+          if (window.history.state?.slackdumpNavigation) {
+            window.history.back();
+          } else {
+            navigate("/", { replace: true });
+          }
+        }}
       >
         <ArrowLeft className="size-4" />
         戻る
@@ -435,6 +480,7 @@ function applyCanvasTheme(frame: HTMLIFrameElement | null) {
 function App() {
   const { location, navigate: push } = useNavigation();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [searchJump, setSearchJump] = useState({ path: "", sequence: 0 });
   const canvasFrame = useRef<HTMLIFrameElement>(null);
   const [dark, setDark] = useState(
     () =>
@@ -447,11 +493,18 @@ function App() {
     applyCanvasTheme(canvasFrame.current);
   }, [dark]);
   const navigate = useCallback(
-    (path: string) => {
-      push(path);
+    (path: string, options?: { replace?: boolean }) => {
+      push(path, options);
       setMobileOpen(false);
     },
     [push, setMobileOpen],
+  );
+  const navigateSearchResult = useCallback(
+    (path: string) => {
+      navigate(path);
+      setSearchJump((jump) => ({ path, sequence: jump.sequence + 1 }));
+    },
+    [navigate],
   );
   const bootstrap = useQuery({
     queryKey: ["bootstrap"],
@@ -500,7 +553,11 @@ function App() {
           >
             <Menu className="size-5" />
           </Button>
-          <GlobalSearch navigate={navigate} channelId={channelId} />
+          <GlobalSearch
+            navigate={navigateSearchResult}
+            channelId={channelId}
+            locationKey={`${location.path}${location.hash}`}
+          />
           <Button
             variant="ghost"
             size="icon"
@@ -599,6 +656,8 @@ function App() {
                         key={`${channelId}:${at || "latest"}`}
                         channelId={channelId}
                         at={at}
+                        jumpRequest={searchJump.sequence}
+                        focusSearchResult={searchJump.path === `${location.path}${location.hash}`}
                         navigate={navigate}
                         hasTabs={channel.data.canvasPresent}
                       />
@@ -631,6 +690,8 @@ function App() {
                     channelId={channelId}
                     threadTs={threadTs}
                     at={hash}
+                    jumpRequest={searchJump.sequence}
+                    focusSearchResult={searchJump.path === `${location.path}${location.hash}`}
                     navigate={navigate}
                   />
                 </aside>

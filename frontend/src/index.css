@@ -216,17 +216,28 @@
 .message-content .file-preview-container .file-image {
   display: block;
 }
+.message-content .file-preview-container:has(> .file-image) {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  width: fit-content;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--background);
+}
+.message-content .file-preview-container:has(> .file-image) .file-image {
+  border: 0;
+  border-radius: 0;
+}
 .message-content .file-download {
-  position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
   display: grid;
   width: 2.75rem;
   height: 2.75rem;
+  margin: 0.25rem;
   place-items: center;
-  border: 1px solid var(--border);
-  border-radius: 0.625rem;
-  background: var(--background);
+  border-radius: 0.375rem;
+  background: transparent;
   color: var(--foreground);
   text-decoration: none;
 }
@@ -250,6 +261,13 @@
 }
 .message-content .slack-files > * {
   margin-bottom: 0.3rem;
+}
+.message-content .slack-files > p:first-child {
+  margin: 0 0 0.35rem;
+  color: var(--muted-foreground);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1.25;
 }
 .message-content .file-items.multi {
   display: flex;
@@ -279,10 +297,16 @@
   border: 1px solid var(--border);
   border-radius: 0.5rem;
   padding: 0.4rem 0.6rem;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
   text-decoration: none;
 }
 .message-content .file-link:hover {
   background: var(--accent);
+}
+.message-content .file-link:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .message-content .file-hidden {
   color: var(--muted-foreground);

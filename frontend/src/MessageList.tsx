@@ -11,6 +11,8 @@ type Props = {
   channelId: string;
   threadTs?: string;
   at?: string;
+  jumpRequest?: number;
+  focusSearchResult?: boolean;
   navigate: (path: string) => void;
   hasTabs?: boolean;
 };
@@ -27,11 +29,13 @@ function MessageRow({
   channelId,
   navigate,
   compact = false,
+  highlighted = false,
 }: {
   message: Message;
   channelId: string;
   navigate: (path: string) => void;
   compact?: boolean;
+  highlighted?: boolean;
 }) {
   const channelPath = `/archives/${encodeURIComponent(channelId)}`;
   const threadPath = `${channelPath}/${encodeURIComponent(message.threadTs || message.ts)}`;
@@ -65,7 +69,8 @@ function MessageRow({
   return (
     <article
       id={message.ts}
-      className="message-row group flex gap-3 px-5 py-3 hover:bg-accent/35 sm:px-8"
+      aria-current={highlighted ? "location" : undefined}
+      className={`message-row group flex gap-3 px-5 py-3 hover:bg-accent/35 sm:px-8 ${highlighted ? "bg-primary/10" : ""}`}
     >
       <button
         type="button"
@@ -113,22 +118,22 @@ function MessageRow({
           <Button
             variant="ghost"
             size="xs"
-            className="min-h-11 gap-1 px-2 text-xs text-muted-foreground sm:min-h-7 sm:px-1"
+            className="min-h-11 min-w-11 justify-center gap-1 px-2 text-xs text-muted-foreground sm:min-h-7 sm:min-w-0 sm:justify-start sm:px-1"
             aria-label="投稿リンクをコピー"
             title="投稿リンクをコピー"
             onClick={() => void copyLink()}
           >
             {copyStatus === "copied" ? (
-              <Check className="size-3.5" />
+              <Check className="size-4 sm:size-3.5" />
             ) : (
-              <Copy className="size-3.5" />
+              <Copy className="size-4 sm:size-3.5" />
             )}
             <span
               aria-hidden="true"
               className={
                 copyStatus === "idle"
-                  ? "sm:hidden sm:group-hover:inline sm:group-focus-within:inline"
-                  : ""
+                  ? "hidden sm:group-hover:inline sm:group-focus-within:inline"
+                  : "hidden sm:inline"
               }
             >
               {copyStatus === "copied" ? "コピーしました" : "リンクをコピー"}
@@ -164,12 +169,24 @@ function MessageRow({
   );
 }
 
-export default function MessageList({ channelId, threadTs, at, navigate, hasTabs }: Props) {
+export default function MessageList({
+  channelId,
+  threadTs,
+  at,
+  jumpRequest = 0,
+  focusSearchResult = false,
+  navigate,
+  hasTabs,
+}: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [visibleDate, setVisibleDate] = useState<string>();
   const initialized = useRef(false);
   const pendingPrepend = useRef<{ total: number; top: number; rootEnd?: number } | null>(null);
   const pendingAppend = useRef<{ total: number; top: number } | null>(null);
   const lastScrollTop = useRef(0);
+  const lastJumpHandled = useRef(jumpRequest);
+  const anchorPageRequested = useRef(false);
+  const [anchorPageReady, setAnchorPageReady] = useState(!at || !focusSearchResult);
   const initialPageParam: MessageCursor = { at };
   const query = useInfiniteQuery({
     queryKey: ["messages", channelId, threadTs || "", at || "latest"],
@@ -195,7 +212,7 @@ export default function MessageList({ channelId, threadTs, at, navigate, hasTabs
     () => (query.data ? [...query.data.pages].reverse().flatMap((page) => page.messages) : []),
     [query.data],
   );
-  const root = query.data?.pages[0]?.root;
+  const root = query.data?.pages.find((page) => page.root)?.root;
   const loaderCount = hasNextPage ? 1 : 0;
   const newerLoaderCount = hasPreviousPage ? 1 : 0;
   const rootCount = threadTs && root ? 1 : 0;
@@ -218,10 +235,57 @@ export default function MessageList({ channelId, threadTs, at, navigate, hasTabs
     overscan: 8,
   });
 
+  useEffect(() => {
+    if (!at || !focusSearchResult || !query.data || anchorPageRequested.current) return;
+    anchorPageRequested.current = true;
+    if (hasPreviousPage && query.data.pages.length === 1) {
+      void fetchPreviousPage().finally(() => setAnchorPageReady(true));
+    } else {
+      setAnchorPageReady(true);
+    }
+  }, [at, focusSearchResult, query.data, hasPreviousPage, fetchPreviousPage]);
+
+  useEffect(() => {
+    const node = scrollRef.current;
+    if (!node || !query.data) return;
+    let frame: number | undefined;
+    const updateVisibleDate = () => {
+      const first = virtualizer.getVirtualItems().find((item) => {
+        if (item.end <= node.scrollTop + 1) return false;
+        return (rootCount && item.index === loaderCount) || !!messages[item.index - messageOffset];
+      });
+      const time =
+        rootCount && first?.index === loaderCount
+          ? root?.time
+          : messages[(first?.index ?? -1) - messageOffset]?.time;
+      const date = (time || root?.time || messages[0]?.time)?.slice(0, 10);
+      if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) setVisibleDate(date);
+    };
+    const onScroll = () => {
+      if (frame !== undefined) return;
+      frame = requestAnimationFrame(() => {
+        frame = undefined;
+        updateVisibleDate();
+      });
+    };
+    node.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => {
+      node.removeEventListener("scroll", onScroll);
+      if (frame !== undefined) cancelAnimationFrame(frame);
+    };
+  }, [query.data, messages, root, rootCount, loaderCount, messageOffset, virtualizer]);
+
   useLayoutEffect(() => {
     const node = scrollRef.current;
     if (!node || !query.data) return;
-    if (pendingPrepend.current) {
+    if (at && focusSearchResult && !anchorPageReady) return;
+    const jumpPending = jumpRequest !== lastJumpHandled.current;
+    if (jumpPending) {
+      pendingPrepend.current = null;
+      pendingAppend.current = null;
+    }
+    if (!jumpPending && pendingPrepend.current) {
       const previous = pendingPrepend.current;
       node.scrollTop =
         previous.rootEnd !== undefined && previous.top < previous.rootEnd
@@ -231,7 +295,7 @@ export default function MessageList({ channelId, threadTs, at, navigate, hasTabs
       pendingPrepend.current = null;
       return;
     }
-    if (pendingAppend.current) {
+    if (!jumpPending && pendingAppend.current) {
       const previous = pendingAppend.current;
       const growth = Math.max(0, virtualizer.getTotalSize() - previous.total);
       node.scrollTop = previous.top + Math.min(growth, 120);
@@ -239,11 +303,16 @@ export default function MessageList({ channelId, threadTs, at, navigate, hasTabs
       pendingAppend.current = null;
       return;
     }
-    if (initialized.current || (messages.length === 0 && !root && !hasPreviousPage)) return;
+    if (
+      (initialized.current && !jumpPending) ||
+      (messages.length === 0 && !root && !hasPreviousPage)
+    )
+      return;
     const target = at ? messages.findIndex((message) => message.ts === at) : -1;
     const finish = () => {
       lastScrollTop.current = node.scrollTop;
       initialized.current = true;
+      lastJumpHandled.current = jumpRequest;
       node.dispatchEvent(new Event("scroll"));
     };
     if (at && target >= 0) {
@@ -278,7 +347,19 @@ export default function MessageList({ channelId, threadTs, at, navigate, hasTabs
       );
       finish();
     });
-  }, [query.data, messages, at, loaderCount, messageOffset, root, hasPreviousPage, virtualizer]);
+  }, [
+    query.data,
+    messages,
+    at,
+    focusSearchResult,
+    anchorPageReady,
+    jumpRequest,
+    loaderCount,
+    messageOffset,
+    root,
+    hasPreviousPage,
+    virtualizer,
+  ]);
 
   useEffect(() => {
     const node = scrollRef.current;
@@ -387,6 +468,15 @@ export default function MessageList({ channelId, threadTs, at, navigate, hasTabs
       tabIndex={hasTabs && !threadTs ? 0 : undefined}
       className="flex min-h-0 flex-1 flex-col"
     >
+      {(messages.length > 0 || root) && (
+        <div className="flex h-8 shrink-0 items-center justify-center border-b bg-muted/20 px-5 text-xs font-medium text-muted-foreground sm:px-8">
+          {visibleDate && (
+            <time dateTime={visibleDate} aria-label={`表示中の日付：${dateLabel(visibleDate)}`}>
+              {dateLabel(visibleDate)}
+            </time>
+          )}
+        </div>
+      )}
       <div
         ref={scrollRef}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
@@ -430,10 +520,12 @@ export default function MessageList({ channelId, threadTs, at, navigate, hasTabs
                 ) : message ? (
                   <>
                     {(!previous || previous.time.slice(0, 10) !== message.time.slice(0, 10)) && (
-                      <div className="relative my-4 border-t text-center">
-                        <span className="relative -top-2.5 rounded-full border bg-background px-3 py-1 text-xs font-medium text-muted-foreground">
+                      <div data-date-separator className="my-4 flex items-center text-center">
+                        <span aria-hidden="true" className="h-px flex-1 bg-border" />
+                        <span className="rounded-full border bg-background px-3 py-1 text-xs font-medium text-muted-foreground">
                           {dateLabel(message.time)}
                         </span>
+                        <span aria-hidden="true" className="h-px flex-1 bg-border" />
                       </div>
                     )}
                     <MessageRow
@@ -441,6 +533,7 @@ export default function MessageList({ channelId, threadTs, at, navigate, hasTabs
                       channelId={channelId}
                       navigate={navigate}
                       compact={!!threadTs}
+                      highlighted={focusSearchResult && message.ts === at}
                     />
                   </>
                 ) : (
