@@ -1,0 +1,17 @@
+#!/bin/bash
+set -euo pipefail
+
+runuser -u slack-dump -- \
+  env HOME=/var/lib/slack-dump \
+  /usr/bin/slackdump resume \
+    -chan-types public_channel \
+    -refresh \
+    -threads \
+    -dedupe \
+    /srv/slack-dump/archive
+
+# Viewer snapshots are refreshed by slack-dump-view-refresh.service via OnSuccess.
+# A failed MCP restart must not prevent a completed archive from refreshing the viewer.
+if ! systemctl try-restart slack-dump-mcp.service; then
+  echo "warning: slack-dump-mcp.service restart failed" >&2
+fi

@@ -1,0 +1,8 @@
+[Unit]
+Description=Refresh Slack Dump Viewer Snapshot after archive success
+After=slack-dump-resume.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/slack-dump-view-refresh
+TimeoutStartSec=20min

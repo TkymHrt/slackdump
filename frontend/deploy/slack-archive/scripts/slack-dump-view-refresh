@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+
+live=/srv/slack-dump/archive/slackdump.sqlite
+view=/srv/slack-dump/viewer-archive/slackdump.sqlite
+next=/srv/slack-dump/viewer-archive/slackdump.sqlite.next
+previous=/srv/slack-dump/viewer-archive/slackdump.sqlite.previous
+viewer_unit=slack-dump-view.service
+rollback_needed=0
+
+cleanup() {
+  status=$?
+  if (( status != 0 && rollback_needed == 1 )); then
+    echo "viewer refresh failed; restoring previous snapshot" >&2
+    systemctl stop "$viewer_unit" || true
+    sqlite3 "$previous" ".backup '$view'" || true
+    chown slack-dump:slack-dump "$view" || true
+    chmod 0600 "$view" || true
+    systemctl start "$viewer_unit" || true
+  fi
+  rm -f -- "$next" "$next-wal" "$next-shm"
+  return "$status"
+}
+trap cleanup EXIT
+
+if [[ $(systemctl show -P ActiveState slack-dump-resume.service) != inactive ||
+      $(systemctl show -P Result slack-dump-resume.service) != success ]]; then
+  echo "archive job has not finished successfully; keeping current viewer snapshot"
+  exit 0
+fi
+
+rm -f -- "$next" "$next-wal" "$next-shm"
+sqlite3 "$live" ".backup '$next'"
+if [[ $(sqlite3 "$next" 'PRAGMA quick_check;') != ok ]]; then
+  echo "new viewer snapshot failed quick_check" >&2
+  exit 1
+fi
+
+# Prebuild the viewer index while the current viewer remains available.
+sqlite3 "$next" 'CREATE INDEX IF NOT EXISTS MESSAGE_VIEWER_PAGE ON MESSAGE (CHANNEL_ID, ID DESC, CHUNK_ID DESC);'
+if [[ $(sqlite3 "$next" 'PRAGMA quick_check;') != ok ]]; then
+  echo "indexed viewer snapshot failed quick_check" >&2
+  exit 1
+fi
+sqlite3 "$next" 'PRAGMA wal_checkpoint(TRUNCATE);' >/dev/null
+chown slack-dump:slack-dump "$next"
+chmod 0600 "$next"
+
+# The old snapshot is a rollback point. Both copies use SQLite's online backup.
+sqlite3 "$view" ".backup '$previous'"
+rollback_needed=1
+systemctl stop "$viewer_unit"
+sqlite3 "$next" ".backup '$view'"
+chown slack-dump:slack-dump "$view"
+chmod 0600 "$view"
+systemctl start "$viewer_unit"
+
+ready=0
+for (( attempt = 0; attempt < 300; attempt++ )); do
+  if curl --max-time 2 --silent --fail --output /dev/null http://127.0.0.1:8080/api/bootstrap; then
+    ready=1
+    break
+  fi
+  sleep 1
+done
+if (( ready == 0 )); then
+  echo "viewer did not become healthy within five minutes" >&2
+  exit 1
+fi
+
+rollback_needed=0
+echo "viewer snapshot refreshed"
