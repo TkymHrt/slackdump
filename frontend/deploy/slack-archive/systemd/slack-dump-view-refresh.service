@@ -5,4 +5,6 @@ After=slack-dump-resume.service
 [Service]
 Type=oneshot
 ExecStart=/usr/local/sbin/slack-dump-view-refresh
-TimeoutStartSec=20min
+ExecStopPost=/usr/local/sbin/slack-dump-view-refresh --recover
+TimeoutStartSec=45min
+TimeoutStopSec=10min
