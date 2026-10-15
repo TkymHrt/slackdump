@@ -94,16 +94,6 @@ def copy_connection(src, dst, source):
     src.backup(dst, pages=256, progress=progress, sleep=0.1)
 
 
-def backup(source, target):
-    with database(source, readonly=True) as src:
-        dst = sqlite3.connect(target, timeout=5)
-        try:
-            copy_connection(src, dst, source)
-        finally:
-            dst.close()
-    normalize(target)
-
-
 def require_memory(path):
     # Allow space for the working SQLite DB, index/sort buffers and file cache.
     meminfo = Path('/proc/meminfo')
@@ -115,51 +105,19 @@ def require_memory(path):
             raise MemoryError(f'snapshot requires at least {required} bytes RAM; configured={total}')
 
 
-def prepare_index(path):
-    require_memory(path)
-    indexed = path.with_name('indexed.sqlite')
-    memory = sqlite3.connect(':memory:')
-    try:
-        with stage('index-memory-load'):
-            with database(path, readonly=True) as src:
-                copy_connection(src, memory, path)
-        with stage('index-memory-build'):
-            deadline = time.monotonic()+OPERATION_TIMEOUT
-            memory.set_progress_handler(lambda: int(time.monotonic() >= deadline), 10000)
-            memory.execute('PRAGMA temp_store=MEMORY')
-            memory.execute('CREATE INDEX IF NOT EXISTS MESSAGE_VIEWER_PAGE ON MESSAGE (CHANNEL_ID, ID DESC, CHUNK_ID DESC)')
-            memory.commit()
-            if memory.execute('PRAGMA quick_check').fetchall() != [('ok',)]:
-                raise RuntimeError('indexed snapshot failed quick_check')
-        with stage('index-memory-save'):
-            dst = sqlite3.connect(indexed)
-            try:
-                copy_connection(memory, dst, path)
-            finally:
-                dst.close()
-    finally:
-        memory.close()
-    normalize(indexed)
-    os.replace(indexed, path)
-
-
-def check(path):
-    # Cold random reads were slower than the old 20-minute deadline. Loading
-    # into SQLite memory uses sequential backup reads and bounds RAM first.
-    require_memory(path)
-    memory = sqlite3.connect(':memory:')
-    try:
-        with stage('check-memory-load'):
-            with database(path, readonly=True) as src:
-                copy_connection(src, memory, path)
-        with stage('check-memory-verify'):
-            deadline = time.monotonic()+OPERATION_TIMEOUT
-            memory.set_progress_handler(lambda: int(time.monotonic() >= deadline), 10000)
-            result = memory.execute('PRAGMA quick_check').fetchall()
-            if result != [('ok',)]:
-                raise RuntimeError(f'quick_check failed: {path}: {result[:5]}')
-    finally:
-        memory.close()
+def prepare_snapshot(memory, target):
+    with stage('index-memory-build'):
+        deadline = time.monotonic()+OPERATION_TIMEOUT
+        memory.set_progress_handler(lambda: int(time.monotonic() >= deadline), 10000)
+        memory.execute('PRAGMA temp_store=MEMORY')
+        memory.execute('CREATE INDEX IF NOT EXISTS MESSAGE_VIEWER_PAGE ON MESSAGE (CHANNEL_ID, ID DESC, CHUNK_ID DESC)')
+        memory.commit()
+        if memory.execute('PRAGMA quick_check').fetchall() != [('ok',)]:
+            raise RuntimeError('indexed snapshot failed quick_check')
+    with stage('index-memory-save'):
+        with contextlib.closing(sqlite3.connect(target)) as dst:
+            copy_connection(memory, dst, target)
+        normalize(target)
 
 
 def preserve_aliases(previous, next_path):
@@ -202,71 +160,85 @@ class Refresh:
 
     def restore_mcp(self):
         if self.mcp_pending.exists():
-            unit('start', MCP)
-            self.mcp_pending.unlink()
-            sync_directory(self.view.parent)
+            try:
+                unit('start', MCP)
+                self.mcp_pending.unlink()
+                sync_directory(self.view.parent)
+            except Exception:
+                LOG.exception('MCP restart failed; keeping restart marker for retry')
 
     def permissions(self, path):
         shutil.chown(path, user='slack-dump', group='slack-dump')
         path.chmod(0o600)
 
     def recover(self):
-        if not self.pending.exists():
-            if self.viewer_pending.exists():
+        try:
+            # The caller holds the archive lock, so no staging directory is in use.
+            for pattern in ('.refresh-*', '.recover-*'):
+                for path in self.view.parent.glob(pattern):
+                    if path.is_symlink():
+                        path.unlink()
+                    elif path.is_dir():
+                        shutil.rmtree(path)
+            if not self.pending.exists():
+                if self.viewer_pending.exists():
+                    unit('start', VIEWER)
+                    healthy()
+                    self.viewer_pending.unlink()
+                    sync_directory(self.view.parent)
+                return
+            with stage('rollback'):
+                unit('stop', VIEWER)
+                # The rollback was normalized before publishing. Link it instead
+                # of allocating another full DB or opening the failed snapshot.
+                with tempfile.TemporaryDirectory(prefix='.recover-', dir=self.view.parent) as directory:
+                    restored = Path(directory)/'restored.sqlite'
+                    os.link(self.rollback, restored)
+                    self.permissions(restored)
+                    for suffix in ('-wal', '-shm', '-journal'):
+                        self.view.with_name(self.view.name+suffix).unlink(missing_ok=True)
+                    os.replace(restored, self.view)
+                    sync_directory(self.view.parent)
                 unit('start', VIEWER)
                 healthy()
-                self.viewer_pending.unlink()
+                self.pending.unlink()
+                self.viewer_pending.unlink(missing_ok=True)
                 sync_directory(self.view.parent)
-            return
-        with stage('rollback'):
-            unit('stop', VIEWER)
-            # Keep the recovery source intact if interrupted again.
-            with tempfile.TemporaryDirectory(prefix='.recover-', dir=self.view.parent) as directory:
-                restored = Path(directory)/'restored.sqlite'
-                backup(self.rollback, restored)
-                check(restored)
-                self.permissions(restored)
-                normalize(self.view)
-                os.replace(restored, self.view)
-                sync_directory(self.view.parent)
-            unit('start', VIEWER)
-            healthy()
-            self.pending.unlink()
-            self.viewer_pending.unlink(missing_ok=True)
-            sync_directory(self.view.parent)
+        finally:
+            # Viewer recovery must not gate the independent archive-backed MCP.
+            self.restore_mcp()
 
     def run(self):
         self.recover()
-        self.restore_mcp()
         if (unit('show', 'slack-dump-resume.service', '-P', 'ActiveState') != 'inactive'
                 or unit('show', 'slack-dump-resume.service', '-P', 'Result') != 'success'):
             raise RuntimeError('archive job has not finished successfully')
         mcp_active = unit('show', MCP, '-P', 'ActiveState') == 'active'
-        viewer_stopped = False
         try:
             with tempfile.TemporaryDirectory(prefix='.refresh-', dir=self.view.parent) as directory:
                 next_path, old_path = Path(directory)/'next.sqlite', Path(directory)/'old.sqlite'
-                with stage('archive-backup'):
-                    # MCP opens/migrates this DB. Quiesce it before the backup.
-                    if mcp_active:
-                        mark(self.mcp_pending, 'MCP was active before refresh')
-                        unit('stop', MCP)
-                    backup(self.live, next_path)
-                with stage('prepare-index'):
-                    prepare_index(next_path)
+                require_memory(self.live)
+                with contextlib.closing(sqlite3.connect(':memory:')) as memory:
+                    try:
+                        with stage('archive-memory-load'):
+                            if mcp_active:
+                                mark(self.mcp_pending, 'MCP was active before refresh')
+                                unit('stop', MCP)
+                            with database(self.live, readonly=True) as src:
+                                copy_connection(src, memory, self.live)
+                    finally:
+                        self.restore_mcp()
+                    prepare_snapshot(memory, next_path)
                 with stage('preserve-viewer'):
-                    viewer_stopped = True
                     mark(self.viewer_pending, 'restart old viewer if interrupted before publish')
                     unit('stop', VIEWER)
-                    backup(self.view, old_path)
-                    check(old_path)
-                    preserve_aliases(old_path, next_path)
-                    normalize(next_path)
-                    check(next_path)
-                    self.permissions(next_path)
-                    self.permissions(old_path)
-                    # Release WAL before replacing its associated main file.
+                    # Quiesce WAL once, then retain the old inode for rollback.
                     normalize(self.view)
+                    preserve_aliases(self.view, next_path)
+                    normalize(next_path)
+                    self.permissions(next_path)
+                    self.permissions(self.view)
+                    os.link(self.view, old_path)
                 with stage('publish'):
                     os.replace(old_path, self.rollback)
                     sync_directory(self.view.parent)
@@ -278,20 +250,10 @@ class Refresh:
                     self.pending.unlink()
                     self.viewer_pending.unlink()
                     sync_directory(self.view.parent)
-                    viewer_stopped = False
             LOG.info('viewer snapshot refreshed')
         except BaseException:
-            if self.pending.exists():
-                self.recover()
-            elif viewer_stopped:
-                self.recover()
+            self.recover()
             raise
-        finally:
-            if mcp_active:
-                try:
-                    self.restore_mcp()
-                except Exception:
-                    LOG.exception('MCP restart failed; viewer refresh result is unchanged')
 
 
 def main():
@@ -306,7 +268,6 @@ def main():
         signal.signal(signal.SIGTERM, interrupted)
         if sys.argv[1:] == ['--recover']:
             refresh.recover()
-            refresh.restore_mcp()
         elif not sys.argv[1:]:
             refresh.run()
         else:

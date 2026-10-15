@@ -1,3 +1,4 @@
 scripts/* text eol=lf
 systemd/** text eol=lf
 tests/*.py text eol=lf
+install.sh text eol=lf
